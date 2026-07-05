@@ -377,10 +377,18 @@ machine-readable output (e.g. to feed inventory into another tool).
 $ aci-sim show
 Fabric: LAB-IT-ACI  (NDO mgmt IP: 10.192.0.10)
   tep_pool=10.0.0.0/16 infra_vlan=3967 gipo_pool=225.0.0.0/15
+  oob_subnet=- inb_subnet=- (store-only) default_bd_mac=00:22:BD:F8:19:FF
+  isn: enabled=True peer_mesh=full ospf_area=0.0.0.0 mtu=9150 ospf_hello=10 ospf_dead=40
+  isn bfd (store-only): min_rx=50 min_tx=50 multiplier=3
 
-Site LAB1: APIC host=127.0.0.1:8443 mgmt_ip=10.192.0.11 asn=65001 pod=1 controllers=1 fabric_name=LAB1-IT-ACI controller_ips=10.192.0.11 oob_gateway=-
+Site LAB1: APIC host=127.0.0.1:8443 mgmt_ip=10.192.0.11 asn=65001 pod=1 controllers=1 apic_version=4.2(7f) fabric_name=LAB1-IT-ACI controller_ips=10.192.0.11 oob_gateway=-
   ID     NAME                 ROLE         MODEL          VERSION          SERIAL         LOOPBACK       OOB IP
   101    LAB1-ACI-LF101       leaf         N9K-C9332C     n9000-14.2(7f)   SAL10101       10.1.101.1     192.168.1.101
+  ...
+
+Site LAB2: APIC host=127.0.0.1:8444 mgmt_ip=10.192.128.11 asn=65002 pod=1 controllers=1 apic_version=4.2(7f) fabric_name=LAB2-IT-ACI controller_ips=10.192.128.11 oob_gateway=-
+  ID     NAME                 ROLE         MODEL          VERSION          SERIAL         LOOPBACK       OOB IP
+  301    LAB2-ACI-LF301       leaf         N9K-C9332C     n9000-14.2(7f)   SAL20301       10.1.45.2      192.169.1.45
   ...
 
 Port bindings:
@@ -518,7 +526,8 @@ $ aci-sim query --dn uni/tn-mgmt --json
       "fvTenant": {
         "attributes": {
           "dn": "uni/tn-mgmt",
-          "name": "mgmt"
+          "name": "mgmt",
+          "descr": ""
         }
       }
     }
