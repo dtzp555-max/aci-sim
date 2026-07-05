@@ -20,7 +20,7 @@ pip install -e '.[dev]'          # installs aci_sim + fastapi/uvicorn/pydantic/p
 .venv/bin/python -m pytest -q
 ```
 
-The suite currently has **888 tests** and must stay green. If you add a
+The suite currently has **900 tests** and must stay green. If you add a
 feature or fix a bug, add or extend tests under `tests/` in the same PR —
 most existing tests are organized by PR/feature (`tests/test_pr*.py`,
 `tests/test_<feature>.py`); follow that convention for new ones.

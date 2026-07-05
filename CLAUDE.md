@@ -13,7 +13,7 @@ per device on `:443`, needed for NDO auto-discovery clients that hardcode
 port 443). Primary public use case: running Ansible `cisco.aci` playbooks
 against it directly — see `examples/ansible/`.
 
-Test suite: `.venv/bin/python -m pytest -q` (888 tests, must stay green).
+Test suite: `.venv/bin/python -m pytest -q` (900 tests, must stay green).
 Lint: `ruff check .` (non-blocking in CI — pre-existing baseline, see
 `.github/workflows/ci.yml`).
 

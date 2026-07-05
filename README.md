@@ -20,6 +20,25 @@ entire fabric — nodes, tenants, VRFs/BDs/EPGs, contracts, L3Outs, faults,
 endpoints, and the whole NDO schema tree — is generated deterministically
 from a single `topology.yaml`.
 
+![aci-sim topology](docs/images/topology.png)
+
+*A 2-site, 15-node fabric rendered by `aci-sim graph` — spines (blue),
+leaves/border-leaves (green), controllers (amber), and the inter-site ISN
+cloud (slate). See §5's `aci-sim graph` for how to generate your own.*
+
+### 60-second quickstart
+
+```bash
+pip install git+https://github.com/dtzp555-max/aci-sim.git
+aci-sim run &
+aci-sim query fabricNode        # shows the 7-node LAB1 fabric
+```
+
+That's it — no cert generation, no manual `aaaLogin`/cookie handling, no
+clone required. See §4 for the full install/run options (including the
+from-source/clone path needed for `scripts/`, `examples/`, and Ansible) and
+§5 for the full `aci-sim` CLI reference.
+
 ---
 
 ## 1. Purpose
@@ -225,16 +244,25 @@ pip install -e '.[dev]'          # installs aci_sim + fastapi/uvicorn/pydantic/p
 `pip install aci-sim` will work once the project is published to PyPI (not
 yet published — use one of the two forms above until then).
 
+> **Note:** `pip install git+https://...` installs the **package only** —
+> `aci_sim` (the library + the `aci-sim` CLI). It does NOT check out
+> `scripts/`, `examples/`, `deploy/`, or `topology.yaml` (those live in the
+> git repo, not the installed package). That's fine for everyday use —
+> `aci-sim run` / `aci-sim query` / `aci-sim new` / `aci-sim graph` work
+> standalone and scaffold their own `topology.yaml` — but if you want
+> `scripts/sandbox-up.sh`, the Ansible examples, or the systemd/launchd
+> deploy sketches, use the "from source" clone below instead.
+
 ### Port mode (default)
 
 ```bash
-bash scripts/run.sh
-# or, equivalently, via the aci-sim CLI (see §5):
 aci-sim run
+# or, equivalently, from a clone (see scripts/run.sh):
+bash scripts/run.sh
 ```
 
-Generates a self-signed cert on first run (`scripts/gen_certs.sh`) and
-starts:
+Generates a self-signed cert on first run (`scripts/gen_certs.sh`'s logic,
+either via `aci-sim run` or `scripts/run.sh`) and starts:
 
 ```
 [sim] APIC LAB1 (asn 65001) → https://127.0.0.1:8443
@@ -242,10 +270,33 @@ starts:
 [sim] NDO → https://127.0.0.1:8445
 ```
 
-Smoke test:
+Smoke test — like real APIC, every query requires `aaaLogin` first (a bare
+`curl .../class/fabricNode.json` returns a 403 APIC error envelope, not the
+fabric); `aci-sim query` does the login+cookie dance for you:
 
 ```bash
-curl -sk https://127.0.0.1:8443/api/class/fabricNode.json | python -m json.tool
+aci-sim query fabricNode
+```
+
+```console
+CLASS            NAME/KEY                     EXTRA        DN
+fabricNode       LAB1-ACI-SP01                spine        topology/pod-1/node-201
+fabricNode       LAB1-ACI-SP02                spine        topology/pod-1/node-202
+fabricNode       LAB1-ACI-LF101               leaf         topology/pod-1/node-101
+fabricNode       LAB1-ACI-LF102               leaf         topology/pod-1/node-102
+fabricNode       LAB1-ACI-LF103               leaf         topology/pod-1/node-103
+fabricNode       LAB1-ACI-LF104               leaf         topology/pod-1/node-104
+fabricNode       LAB1-ACI-APIC01              controller   topology/pod-1/node-1
+```
+
+Equivalently, the full authenticated curl (if you don't have `aci-sim` on
+`PATH`, e.g. scripting against a remote sim):
+
+```bash
+TOKEN=$(curl -sk https://127.0.0.1:8443/api/aaaLogin.json \
+  -X POST -d '{"aaaUser":{"attributes":{"name":"admin","pwd":"cisco"}}}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["imdata"][0]["aaaLogin"]["attributes"]["token"])')
+curl -sk https://127.0.0.1:8443/api/class/fabricNode.json -H "Cookie: APIC-cookie=$TOKEN" | python3 -m json.tool
 ```
 
 ### Sandbox mode (real per-device IPs on :443)
@@ -417,9 +468,75 @@ $ aci-sim graph lab3.topology.yaml -o lab3.svg
 [aci-sim] wrote topology diagram: lab3.svg
 ```
 
+What the diagram looks like (this repo's default `topology.yaml`, exported to
+PNG):
+
+![aci-sim topology](docs/images/topology.png)
+
+*2 sites, 15 nodes total — spines (blue), leaves/border-leaves (green),
+controllers (amber), ISN cloud (slate).*
+
 Flags: `TOPOLOGY` positional (default `./topology.yaml`), `-o/--output`
 (default `topology.html`; `.html`/`.htm` writes an HTML wrapper, `.svg`
 writes raw SVG).
+
+### `aci-sim query [CLASS]`
+
+A zero-friction, **authenticated** MIT query helper — the ACI/NDO REST API
+requires `aaaLogin` before any query (§10's error-handling section, real-APIC
+behavior), so a bare `curl .../class/fabricNode.json` returns a 403 APIC
+error envelope instead of data. `aci-sim query` does the
+`aaaLogin` -> `APIC-cookie` -> `GET /api/class|mo/...` dance for you, with no
+new dependency (stdlib `urllib.request`/`ssl`/`http.cookies` only — `httpx`
+stays a dev/test-only extra, see §3).
+
+`CLASS` (e.g. `fabricNode`, `fvTenant`, `topSystem`) runs a class query;
+`--dn DN` runs a single-MO query instead. Default output is a compact table
+(one row per MO); `--json` prints the raw APIC envelope.
+
+```console
+$ aci-sim query fabricNode
+CLASS            NAME/KEY                     EXTRA        DN
+fabricNode       LAB1-ACI-SP01                spine        topology/pod-1/node-201
+fabricNode       LAB1-ACI-SP02                spine        topology/pod-1/node-202
+fabricNode       LAB1-ACI-LF101               leaf         topology/pod-1/node-101
+fabricNode       LAB1-ACI-LF102               leaf         topology/pod-1/node-102
+fabricNode       LAB1-ACI-LF103               leaf         topology/pod-1/node-103
+fabricNode       LAB1-ACI-LF104               leaf         topology/pod-1/node-104
+fabricNode       LAB1-ACI-APIC01              controller   topology/pod-1/node-1
+
+$ aci-sim query fvTenant
+CLASS            NAME/KEY                     EXTRA        DN
+fvTenant         mgmt                         -            uni/tn-mgmt
+fvTenant         MS-TN1                       -            uni/tn-MS-TN1
+fvTenant         SF-TN1-LAB1                  -            uni/tn-SF-TN1-LAB1
+
+$ aci-sim query --dn uni/tn-mgmt --json
+{
+  "imdata": [
+    {
+      "fvTenant": {
+        "attributes": {
+          "dn": "uni/tn-mgmt",
+          "name": "mgmt"
+        }
+      }
+    }
+  ],
+  "totalCount": "1"
+}
+```
+
+Flags: `CLASS` positional (omit if using `--dn`), `--dn DN` (mo-query a
+single DN instead of a class query), `--host` (default `127.0.0.1:8443`,
+port-mode LAB1), `--user`/`--password` (default `admin`/`cisco`), `--json`
+(raw APIC envelope instead of the table). On a connection error (sim not
+running), prints a friendly hint instead of a traceback:
+
+```console
+$ aci-sim query fabricNode
+ERROR: could not connect to 127.0.0.1:8443 — is the sim running? start it with `aci-sim run`
+```
 
 ### `aci-sim run [TOPOLOGY]`
 

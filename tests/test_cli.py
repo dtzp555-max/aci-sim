@@ -16,9 +16,14 @@ from pathlib import Path
 import yaml
 
 from aci_sim.cli import (
+    QueryConnectionError,
     _ensure_certs,
+    _error_text_from_envelope,
+    _error_text_from_envelope_dict,
+    _format_query_text,
     build_parser,
     build_run_env_argv,
+    cmd_query,
     generate_topology,
     main,
 )
@@ -459,3 +464,95 @@ class TestRunEnvArgv:
 
         assert cert.read_text(encoding="utf-8") == "existing-cert"
         assert key.read_text(encoding="utf-8") == "existing-key"
+
+
+# ---------------------------------------------------------------------------
+# query — pure-logic helpers only (no live socket binding, same philosophy
+# as TestRunEnvArgv above); the actual aaaLogin->cookie->GET round trip
+# against a live sim is exercised manually (see README §4 quickstart) and by
+# examples/ci/assert_mit.py-style E2E scripts, not by this unit suite.
+# ---------------------------------------------------------------------------
+
+
+class TestQuery:
+    def test_format_query_text_class_query(self) -> None:
+        imdata = [
+            {"fabricNode": {"attributes": {"dn": "topology/pod-1/node-201", "name": "LAB1-SP01", "role": "spine"}}},
+            {"fabricNode": {"attributes": {"dn": "topology/pod-1/node-101", "name": "LAB1-LF101", "role": "leaf"}}},
+        ]
+        text = _format_query_text("fabricNode", imdata)
+        assert "LAB1-SP01" in text
+        assert "spine" in text
+        assert "topology/pod-1/node-201" in text
+        # Header row present
+        assert "CLASS" in text and "DN" in text
+
+    def test_format_query_text_empty(self) -> None:
+        text = _format_query_text("fvTenant", [])
+        assert "No fvTenant objects found." == text
+
+    def test_format_query_text_falls_back_to_dn_when_no_name(self) -> None:
+        imdata = [{"fvCtx": {"attributes": {"dn": "uni/tn-X/ctx-vrf1"}}}]
+        text = _format_query_text("fvCtx", imdata)
+        assert "uni/tn-X/ctx-vrf1" in text
+
+    def test_error_text_from_envelope_dict_detects_error(self) -> None:
+        envelope = {"imdata": [{"error": {"attributes": {"text": "Token was invalid", "code": "403"}}}], "totalCount": "1"}
+        assert _error_text_from_envelope_dict(envelope) == "Token was invalid (code 403)"
+
+    def test_error_text_from_envelope_dict_none_for_ok_envelope(self) -> None:
+        envelope = {"imdata": [{"fabricNode": {"attributes": {"dn": "topology/pod-1/node-201"}}}], "totalCount": "1"}
+        assert _error_text_from_envelope_dict(envelope) is None
+
+    def test_error_text_from_envelope_string_wrapper(self) -> None:
+        raw = json.dumps({"imdata": [{"error": {"attributes": {"text": "bad creds", "code": "401"}}}]})
+        assert _error_text_from_envelope(raw) == "bad creds (code 401)"
+
+    def test_error_text_from_envelope_malformed_json_is_none(self) -> None:
+        assert _error_text_from_envelope("not json") is None
+
+    def test_cmd_query_requires_class_or_dn(self, capsys) -> None:
+        rc = main(["query", "--host", "127.0.0.1:1"])
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "CLASS" in err or "--dn" in err
+
+    def test_cmd_query_connection_error_is_friendly(self, capsys) -> None:
+        # Port 1 should refuse/timeout immediately on any dev machine — no
+        # live sim required for this test, matching TestRunEnvArgv's
+        # no-live-socket philosophy.
+        rc = main(["query", "fabricNode", "--host", "127.0.0.1:1"])
+        out_err = capsys.readouterr().err
+        assert rc == 1
+        assert "is the sim running" in out_err
+        assert "aci-sim run" in out_err
+
+    def test_query_parser_wiring_defaults(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["query", "fabricNode"])
+        assert args.cls == "fabricNode"
+        assert args.dn is None
+        assert args.host == "127.0.0.1:8443"
+        assert args.user == "admin"
+        assert args.password == "cisco"
+        assert args.json is False
+        assert args.func is cmd_query
+
+    def test_query_parser_wiring_dn_and_overrides(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(
+            ["query", "--dn", "uni/tn-mgmt", "--host", "10.0.0.1:9999", "--user", "bob", "--password", "hunter2", "--json"]
+        )
+        assert args.cls is None
+        assert args.dn == "uni/tn-mgmt"
+        assert args.host == "10.0.0.1:9999"
+        assert args.user == "bob"
+        assert args.password == "hunter2"
+        assert args.json is True
+
+    def test_query_connection_error_is_a_distinct_exception_type(self) -> None:
+        # Sanity: QueryConnectionError must not be a bare Exception subclass
+        # confusable with ValueError (used for auth-failure vs connection
+        # failure branching in cmd_query).
+        assert issubclass(QueryConnectionError, Exception)
+        assert not issubclass(QueryConnectionError, ValueError)

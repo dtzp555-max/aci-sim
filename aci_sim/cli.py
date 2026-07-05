@@ -30,6 +30,7 @@ import ipaddress
 import json
 import os
 import re
+import ssl
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -439,6 +440,215 @@ def cmd_lldp(args: argparse.Namespace) -> int:
         text = _format_lldp_text(site.name, site_rows)
         if text:
             print(text)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# query — zero-friction authenticated MIT query (aaaLogin -> cookie -> GET),
+# so newcomers never have to hand-roll the login/cookie dance themselves.
+# stdlib-only (urllib.request + ssl + http.cookies) — httpx is dev-only (see
+# pyproject.toml's [project.optional-dependencies] dev extra), and `aci-sim
+# query` must work from a bare `pip install aci-sim` with no dev extras.
+# ---------------------------------------------------------------------------
+
+DEFAULT_QUERY_HOST = "127.0.0.1:8443"
+DEFAULT_QUERY_USER = "admin"
+DEFAULT_QUERY_PASSWORD = "cisco"
+
+
+class QueryConnectionError(Exception):
+    """Raised when the sim cannot be reached at all (connection refused/timeout)."""
+
+
+def _unverified_ssl_context() -> ssl.SSLContext:
+    """A permissive SSL context that accepts the sim's self-signed cert.
+
+    Mirrors `curl -k` / `httpx.Client(verify=False)` used elsewhere in this
+    repo (examples/ci/assert_mit.py, scripts/e2e_*.py) — the sim's cert is
+    self-signed by scripts/gen_certs.sh, so hostname/CA verification is
+    deliberately skipped for this local dev tool.
+    """
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _aaa_login(host: str, user: str, password: str, timeout: float = 5.0) -> str:
+    """POST /api/aaaLogin.json; return the APIC-cookie token string.
+
+    Raises QueryConnectionError on a connection-level failure (sim not
+    running), or ValueError if the sim answered but login failed (bad
+    credentials / malformed envelope).
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    url = f"https://{host}/api/aaaLogin.json"
+    body = _json.dumps({"aaaUser": {"attributes": {"name": user, "pwd": password}}}).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, method="POST", headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_unverified_ssl_context()) as resp:
+            resp_body = resp.read().decode("utf-8")
+            set_cookie = resp.headers.get_all("Set-Cookie") or []
+    except urllib.error.HTTPError as exc:
+        resp_body = exc.read().decode("utf-8")
+        text = _error_text_from_envelope(resp_body) or f"HTTP {exc.code}"
+        raise ValueError(f"aaaLogin failed: {text}") from exc
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        raise QueryConnectionError(str(exc)) from exc
+
+    token = _extract_cookie(set_cookie, "APIC-cookie")
+    if token is not None:
+        return token
+
+    # Fall back to the token embedded in the aaaLogin response body itself
+    # (docs/CONTRACT.md: imdata[0].aaaLogin.attributes.token) in case
+    # Set-Cookie parsing ever misses it.
+    try:
+        data = _json.loads(resp_body)
+        return data["imdata"][0]["aaaLogin"]["attributes"]["token"]
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError(f"aaaLogin succeeded but no token found in response: {resp_body[:200]}") from exc
+
+
+def _extract_cookie(set_cookie_headers: list[str], name: str) -> str | None:
+    """Pull cookie *name*'s value out of one or more raw Set-Cookie header strings."""
+    from http.cookies import SimpleCookie
+
+    for header in set_cookie_headers:
+        jar: SimpleCookie = SimpleCookie()
+        jar.load(header)
+        if name in jar:
+            return jar[name].value
+    return None
+
+
+def _error_text_from_envelope_dict(data: Any) -> str | None:
+    """If *data* (already-parsed) is an APIC error envelope, return its human-readable text."""
+    imdata = data.get("imdata") if isinstance(data, dict) else None
+    if not imdata or not isinstance(imdata, list):
+        return None
+    first = imdata[0]
+    if isinstance(first, dict) and "error" in first:
+        attrs = first["error"].get("attributes", {})
+        code = attrs.get("code", "")
+        text = attrs.get("text", "")
+        return f"{text} (code {code})" if code else text
+    return None
+
+
+def _error_text_from_envelope(raw_body: str) -> str | None:
+    """If *raw_body* is an APIC error envelope, return its human-readable text."""
+    import json as _json
+
+    try:
+        data = _json.loads(raw_body)
+    except ValueError:
+        return None
+    return _error_text_from_envelope_dict(data)
+
+
+def _query_mit(
+    host: str, token: str, *, cls: str | None, dn: str | None, timeout: float = 5.0
+) -> dict[str, Any]:
+    """GET /api/class/{cls}.json or /api/mo/{dn}.json with the APIC-cookie; return parsed JSON."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    if dn is not None:
+        url = f"https://{host}/api/mo/{dn}.json"
+    else:
+        url = f"https://{host}/api/class/{cls}.json"
+
+    req = urllib.request.Request(url, method="GET", headers={"Cookie": f"APIC-cookie={token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_unverified_ssl_context()) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8")
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        raise QueryConnectionError(str(exc)) from exc
+
+    return _json.loads(raw)
+
+
+# A handful of well-known attributes worth surfacing as extra table columns,
+# tried in this order — the first one present on the MO wins (keeps the
+# table useful across very different classes without a per-class mapping).
+_QUERY_KEY_ATTR_CANDIDATES = ("name", "dn", "id")
+_QUERY_EXTRA_ATTR_CANDIDATES = ("role", "state", "status", "adSt", "operSt", "descr")
+
+
+def _format_query_text(cls_label: str, imdata: list[dict[str, Any]]) -> str:
+    """Render a compact one-row-per-MO table, in `aci-sim lldp`'s tabular style."""
+    if not imdata:
+        return f"No {cls_label} objects found."
+
+    rows: list[dict[str, str]] = []
+    for entry in imdata:
+        if not isinstance(entry, dict) or not entry:
+            continue
+        class_name, body = next(iter(entry.items()))
+        attrs = body.get("attributes", {}) if isinstance(body, dict) else {}
+        key = next((attrs[a] for a in _QUERY_KEY_ATTR_CANDIDATES if attrs.get(a)), "-")
+        extra = next((attrs[a] for a in _QUERY_EXTRA_ATTR_CANDIDATES if attrs.get(a)), "-")
+        rows.append({"class": class_name, "key": key, "extra": extra, "dn": attrs.get("dn", "-")})
+
+    lines = [f"{'CLASS':<16} {'NAME/KEY':<28} {'EXTRA':<12} DN"]
+    for r in rows:
+        lines.append(f"{r['class']:<16} {r['key']:<28} {r['extra']:<12} {r['dn']}")
+    return "\n".join(lines)
+
+
+def cmd_query(args: argparse.Namespace) -> int:
+    host = args.host
+    user = args.user
+    password = args.password
+
+    if not args.dn and not args.cls:
+        print("ERROR: provide a CLASS (e.g. `aci-sim query fabricNode`) or --dn DN", file=sys.stderr)
+        return 1
+
+    try:
+        token = _aaa_login(host, user, password)
+    except QueryConnectionError:
+        print(
+            f"ERROR: could not connect to {host} — is the sim running? "
+            f"start it with `aci-sim run`",
+            file=sys.stderr,
+        )
+        return 1
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        data = _query_mit(host, token, cls=args.cls if not args.dn else None, dn=args.dn)
+    except QueryConnectionError:
+        print(
+            f"ERROR: could not connect to {host} — is the sim running? "
+            f"start it with `aci-sim run`",
+            file=sys.stderr,
+        )
+        return 1
+
+    imdata = data.get("imdata", []) if isinstance(data, dict) else []
+    error_text = _error_text_from_envelope_dict(data)
+    if error_text is not None:
+        print(f"ERROR: {error_text}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+
+    label = args.dn if args.dn else args.cls
+    print(_format_query_text(label, imdata))
     return 0
 
 
@@ -1667,6 +1877,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_lldp.add_argument("--cdp", action="store_true", help="Show CDP neighbors instead of LLDP.")
     p_lldp.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of text.")
     p_lldp.set_defaults(func=cmd_lldp)
+
+    p_query = sub.add_parser(
+        "query",
+        help="Authenticated MIT query (aaaLogin -> cookie -> GET) against a running sim — no manual cookie handling.",
+    )
+    p_query.add_argument("cls", metavar="CLASS", nargs="?", default=None, help="MO class to query, e.g. fabricNode, fvTenant, topSystem")
+    p_query.add_argument("--dn", default=None, help="Query a single MO by DN instead of a class query")
+    p_query.add_argument("--host", default=DEFAULT_QUERY_HOST, help=f"APIC host:port (default: {DEFAULT_QUERY_HOST}, i.e. port-mode LAB1)")
+    p_query.add_argument("--user", default=DEFAULT_QUERY_USER, help=f"Admin username (default: {DEFAULT_QUERY_USER})")
+    p_query.add_argument("--password", default=DEFAULT_QUERY_PASSWORD, help=f"Admin password (default: {DEFAULT_QUERY_PASSWORD})")
+    p_query.add_argument("--json", action="store_true", help="Emit the raw APIC JSON envelope instead of a compact table.")
+    p_query.set_defaults(func=cmd_query)
 
     p_graph = sub.add_parser(
         "graph", help="Render a self-contained SVG/HTML topology diagram (no server, no CDN)."

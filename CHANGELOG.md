@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.17.0] - 2026-07-05
+
+### Added
+- **`aci-sim query CLASS`** — a zero-friction, stdlib-only authenticated MIT
+  query helper (`aci_sim/cli.py`'s `cmd_query`), closing a clean-room
+  onboarding gap: the README's smoke test (`curl .../class/fabricNode.json`)
+  returned an APIC 403 error envelope, not the fabric, because — like real
+  APIC — the sim requires `aaaLogin` before any query. `aci-sim query`
+  does the `aaaLogin` -> `APIC-cookie` -> `GET /api/class|mo/...` dance for
+  you (via `urllib.request`/`ssl`/`http.cookies`, no new dependency — httpx
+  stays dev-only) and prints a compact table (`--json` for the raw
+  envelope). Supports `--dn DN` for a single-MO query, `--host`/`--user`/
+  `--password` overrides, and a friendly hint ("is the sim running? start
+  it with `aci-sim run`") on a connection error instead of a traceback.
+
+### Fixed
+- **`scripts/run.sh` failed with `ModuleNotFoundError: uvicorn` outside an
+  activated venv.** It invoked bare `python` (whatever that resolves to on
+  `$PATH`), unlike `scripts/sandbox-up.sh` which already resolves
+  `./.venv/bin/python`. Now `scripts/run.sh` uses the same
+  `PY="./.venv/bin/python"` (falling back to `python3`) pattern, so
+  `bash scripts/run.sh` works from a fresh, non-activated shell right after
+  `pip install -e '.[dev]'` — no `source .venv/bin/activate` required.
+- **README quickstart + smoke test now copy-paste-correct.** Added a
+  60-second quickstart (`pip install` -> `aci-sim run` -> `aci-sim query
+  fabricNode`) verified end-to-end in a clean-room test; the old smoke test
+  (`curl` with no login) is replaced with `aci-sim query fabricNode` (or the
+  full authenticated curl, shown as an alternative). Also embeds a rendered
+  `aci-sim graph` topology screenshot (`docs/images/topology.png`) near the
+  top and in the `aci-sim graph` CLI section, and documents `aci-sim query`
+  in §5 with a live sample transcript.
+
 ## [0.16.0] - 2026-07-05
 
 ### Changed

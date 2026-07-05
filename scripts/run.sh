@@ -4,7 +4,9 @@
 # unchanged.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+PY="./.venv/bin/python"
+[ -x "$PY" ] || PY="python3"
 if [ ! -f certs/sim.crt ] || [ ! -f certs/sim.key ]; then
   bash scripts/gen_certs.sh
 fi
-python -m aci_sim.runtime.supervisor
+"$PY" -m aci_sim.runtime.supervisor
