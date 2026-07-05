@@ -1,0 +1,83 @@
+---
+# teardown.yml — remove everything smoke.yml created (state=absent), in
+# reverse dependency order. Deleting the tenant cascades its whole subtree
+# in aci-sim (see docs/CONTRACT.md §11, MITStore.delete), so the
+# later tasks are mostly redundant once the tenant is gone — they're kept
+# here for clarity and so this playbook also works if you only want to
+# tear down a single child object.
+#
+#   ansible-playbook -i inventory.ini teardown.yml
+#
+- name: aci-sim teardown — remove smoke.yml objects
+  hosts: aci_sim
+  connection: local
+  gather_facts: false
+
+  vars:
+    aci_connection: &aci_connection
+      host: "{{ aci_hostname }}"
+      port: "{{ aci_port | default(8443) }}"
+      username: "{{ aci_username | default('admin') }}"
+      password: "{{ aci_password | default('cisco') }}"
+      validate_certs: "{{ aci_validate_certs | default(false) }}"
+      use_ssl: "{{ aci_use_ssl | default(true) }}"
+
+    smoke_tenant: SMOKE-TN1
+    smoke_vrf: SMOKE-VRF1
+    smoke_bd: SMOKE-BD1
+    smoke_ap: SMOKE-AP1
+    smoke_epg: SMOKE-EPG1
+
+  tasks:
+    - name: Remove EPG
+      cisco.aci.aci_epg:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        ap: "{{ smoke_ap }}"
+        epg: "{{ smoke_epg }}"
+        bd: "{{ smoke_bd }}"
+        state: absent
+
+    - name: Remove application profile
+      cisco.aci.aci_ap:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        ap: "{{ smoke_ap }}"
+        state: absent
+
+    - name: Remove bridge domain
+      cisco.aci.aci_bd:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        bd: "{{ smoke_bd }}"
+        vrf: "{{ smoke_vrf }}"
+        state: absent
+
+    - name: Remove VRF
+      cisco.aci.aci_vrf:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        vrf: "{{ smoke_vrf }}"
+        state: absent
+
+    - name: Remove tenant (cascades any remaining children)
+      cisco.aci.aci_tenant:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        state: absent
+
+    - name: Re-run tenant delete (idempotency check — must be changed=false)
+      cisco.aci.aci_tenant:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        state: absent
+      register: tenant_redelete
+
+    - name: Assert delete idempotency
+      ansible.builtin.assert:
+        that:
+          - not tenant_redelete.changed
+        fail_msg: >-
+          Deleting an already-absent tenant reported changed=true — DELETE
+          on a missing DN should be idempotent (see docs/CONTRACT.md §11).
+        success_msg: Delete idempotency check passed.

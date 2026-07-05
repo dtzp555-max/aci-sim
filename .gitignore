@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+certs/*.pem
+certs/*.key
+certs/*.crt
+*.egg-info/
+.DS_Store
+snapshots/
+verify_findings.py

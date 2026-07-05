@@ -1,0 +1,145 @@
+---
+# smoke.yml — create tenant/VRF/BD/AP/EPG against aci-sim and verify
+# idempotency (run twice: second run must report changed=false for every task).
+#
+#   ansible-playbook -i inventory.ini smoke.yml
+#
+# Uses the cisco.aci collection (https://github.com/CiscoDevNet/ansible-aci).
+# Install it first if needed:
+#   ansible-galaxy collection install cisco.aci
+#
+- name: aci-sim smoke test — tenant/VRF/BD/AP/EPG create + idempotency
+  hosts: aci_sim
+  connection: local
+  gather_facts: false
+
+  vars:
+    aci_connection: &aci_connection
+      host: "{{ aci_hostname }}"
+      port: "{{ aci_port | default(8443) }}"
+      username: "{{ aci_username | default('admin') }}"
+      password: "{{ aci_password | default('cisco') }}"
+      validate_certs: "{{ aci_validate_certs | default(false) }}"
+      use_ssl: "{{ aci_use_ssl | default(true) }}"
+
+    smoke_tenant: SMOKE-TN1
+    smoke_vrf: SMOKE-VRF1
+    smoke_bd: SMOKE-BD1
+    smoke_ap: SMOKE-AP1
+    smoke_epg: SMOKE-EPG1
+
+  tasks:
+    - name: Ensure tenant exists
+      cisco.aci.aci_tenant:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        description: Created by aci-sim examples/ansible/smoke.yml
+        state: present
+      register: tenant_result
+
+    - name: Ensure VRF exists
+      cisco.aci.aci_vrf:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        vrf: "{{ smoke_vrf }}"
+        state: present
+      register: vrf_result
+
+    - name: Ensure bridge domain exists
+      cisco.aci.aci_bd:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        bd: "{{ smoke_bd }}"
+        vrf: "{{ smoke_vrf }}"
+        state: present
+      register: bd_result
+
+    - name: Ensure application profile exists
+      cisco.aci.aci_ap:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        ap: "{{ smoke_ap }}"
+        state: present
+      register: ap_result
+
+    - name: Ensure EPG exists
+      cisco.aci.aci_epg:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        ap: "{{ smoke_ap }}"
+        epg: "{{ smoke_epg }}"
+        bd: "{{ smoke_bd }}"
+        state: present
+      register: epg_result
+
+    - name: Report first-run results (expect changed=true for a fresh sim)
+      ansible.builtin.debug:
+        msg: >-
+          tenant changed={{ tenant_result.changed }},
+          vrf changed={{ vrf_result.changed }},
+          bd changed={{ bd_result.changed }},
+          ap changed={{ ap_result.changed }},
+          epg changed={{ epg_result.changed }}
+
+    # --- Idempotency re-check -------------------------------------------------
+    # Re-running every task above against the same state must report
+    # changed=false. This block re-issues each module and fails the play if
+    # any of them still reports a change, catching non-idempotent behavior.
+
+    - name: Re-apply tenant (idempotency check)
+      cisco.aci.aci_tenant:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        description: Created by aci-sim examples/ansible/smoke.yml
+        state: present
+      register: tenant_recheck
+
+    - name: Re-apply VRF (idempotency check)
+      cisco.aci.aci_vrf:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        vrf: "{{ smoke_vrf }}"
+        state: present
+      register: vrf_recheck
+
+    - name: Re-apply bridge domain (idempotency check)
+      cisco.aci.aci_bd:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        bd: "{{ smoke_bd }}"
+        vrf: "{{ smoke_vrf }}"
+        state: present
+      register: bd_recheck
+
+    - name: Re-apply application profile (idempotency check)
+      cisco.aci.aci_ap:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        ap: "{{ smoke_ap }}"
+        state: present
+      register: ap_recheck
+
+    - name: Re-apply EPG (idempotency check)
+      cisco.aci.aci_epg:
+        <<: *aci_connection
+        tenant: "{{ smoke_tenant }}"
+        ap: "{{ smoke_ap }}"
+        epg: "{{ smoke_epg }}"
+        bd: "{{ smoke_bd }}"
+        state: present
+      register: epg_recheck
+
+    - name: Assert idempotency (all re-applies must be changed=false)
+      ansible.builtin.assert:
+        that:
+          - not tenant_recheck.changed
+          - not vrf_recheck.changed
+          - not bd_recheck.changed
+          - not ap_recheck.changed
+          - not epg_recheck.changed
+        fail_msg: >-
+          Idempotency check failed — at least one module reported a change on
+          a re-apply against unchanged state. This usually means the sim (or
+          the playbook's parameters) disagree between GET-existing and the
+          proposed diff.
+        success_msg: Idempotency check passed — no module reported a change on re-apply.

@@ -1,0 +1,330 @@
+# aci-sim — 2-site ACI lab topology
+#
+# Object names follow a GENERICISED ACI naming convention (derived from a real
+# NIP/LLD, with all customer/site-specific tokens stripped):
+#   region/site codes:  LAB0 = stretched (multi-site)   LAB1 = site-1 fabric   LAB2 = site-2 fabric
+#   tenant:   MS-<pattern>  (multi-site/NDO)   SF-<pattern>  (single-fabric)     pattern = TN1 (no-FW)
+#   vrf:      vrf-L3_<region> / vrf-L2_<region>
+#   bd:       bd-BD<n>_<region>       (BD3+ = stretched, BD1/BD2 = local, L2 = L2-only)
+#   ap:       app-Stretched_<name>_<region> / app-Local_<name>_<region>
+#   epg:      epg-APP<n>_Stretched_BD / epg-APP<n>_Local_BD
+#   l3out:    l3o-bgp-Core_<region>   ext-epg: xepg-All_<region>
+#   contract: con-<name>_<region>     filter: flt-<name>_<region>
+#   domain:   phy-<purpose> / l3d-<purpose> / vmm-vmw-<site>   vlan pool: vlp-<purpose>   aaep: aep-<purpose>
+#   switch:   <site>-ACI-SP<nn> (spine) / <site>-ACI-LF<node_id> (leaf) / <site>-ACI-APIC<nn> / <site>-ACI-CSW<nn>
+#
+# APIC LAB1  →  127.0.0.1:8443   (sandbox 10.192.0.11:443,  subnet 10.192.0.0/25)
+# APIC LAB2  →  127.0.0.1:8444   (sandbox 10.192.128.11:443, subnet 10.192.128.0/25)
+# NDO        →  127.0.0.1:8445   (sandbox 10.192.0.10:443)
+#
+# Node-ID scheme (unchanged): LAB1 leaves 101-102 / spines 201-202 / border 103-104;
+#                             LAB2 leaves 301-302 / spines 401-402 / border 303-304.
+
+fabric:
+  name: LAB-IT-ACI
+  evpn_rr: spine  # spines act as BGP-EVPN route-reflectors; leaves are clients
+  loopback_pool: "10.0.0.0/16"
+  oob_pool: "192.168.0.0/16"
+  ndo_mgmt_ip: "10.192.0.10"   # NDO/ND (in LAB1's mgmt subnet)
+  # ---- Tier-1 fabric params (PR-18) — all optional, shown here at their
+  # schema defaults (uncomment/edit to override; omitting them entirely is
+  # equivalent to the values below, so existing files need no changes):
+  # tep_pool: "10.0.0.0/16"      # infra TEP address space (store+validate only; see docs/DESIGN.md PR-18 note)
+  # infra_vlan: 3967             # fabric infrastructure VLAN, 1-4094 (store+validate only)
+  # gipo_pool: "225.0.0.0/15"    # multicast GIPo pool (store+validate only)
+  # ---- Tier-3 fine-tuning params (PR-20) — all optional, shown here at
+  # their schema defaults (uncomment/edit to override; omitting them is
+  # equivalent to the values below, so existing files need no changes):
+  # oob_subnet: "192.168.0.0/16"   # explicit OOB mgmt subnet (store+validate only; must fall within 192.168.0.0/16)
+  # inb_subnet: "10.100.0.0/16"    # in-band mgmt subnet (store+validate only — no mgmtInB MO built by this sim)
+  # default_bd_mac: "00:22:BD:F8:19:FF"  # fabric-wide default BD gateway MAC -> fvBD.mac (real ACI default)
+  # default_apic_version: "4.2(7f)"     # fabric-wide APIC controller version override; wins over each site's own apic_version
+  # ---- Single-APIC-per-site by design (PR-21) — see README "Configuration"
+  # section. APIC cluster size does not affect Ansible playbook deployment
+  # testing (a playbook targets ONE APIC endpoint); cluster size only matters
+  # for cluster-health/appliance-vector tooling (e.g. autoACI's health_score.py).
+  # Each site below omits `controllers`, so it defaults to 1 (single APIC).
+  # To exercise multi-controller/cluster-health semantics on a site, add:
+  #   controllers: 3                                    # 1-5, real ACI's min cluster size is 3
+  #   controller_ips: ["10.192.0.11", "10.192.0.12", "10.192.0.13"]  # optional; omit to auto-derive sequentially from mgmt_ip
+
+# ---------------------------------------------------------------------------
+# Sites
+# ---------------------------------------------------------------------------
+sites:
+  - name: LAB1
+    id: "1"
+    apic_host: "127.0.0.1:8443"
+    mgmt_ip: "10.192.0.11"       # sandbox: LAB1 APIC (subnet 10.192.0.0/25, served on :443)
+    fabric_name: "LAB1-IT-ACI"   # topSystem.fabricDomain → autoACI site grouping/colour
+    asn: 65001
+    pod: 1
+    # controllers: 1   # APIC cluster size (Tier-1, PR-18; single-APIC default, PR-21); default 1, shown here at its default
+    # oob_gateway: "10.192.0.1"   # OOB mgmt default gateway (OOB-gateway PR); optional, default
+    #   None (omitted) — when set, lands on the real mgmt-tenant MO
+    #   uni/tn-mgmt/mgmtp-default/oob-default/rsooBStNode-[<node-dn>]'s `gw`
+    #   attribute for every node at this site (build/mgmt.py); when unset,
+    #   that same MO still builds, just with an empty `gw` (no gateway
+    #   invented/derived).
+    spines:
+      - {id: 201, name: "LAB1-ACI-SP01"}
+      - {id: 202, name: "LAB1-ACI-SP02"}
+    leaves:
+      - {id: 101, name: "LAB1-ACI-LF101"}
+      - {id: 102, name: "LAB1-ACI-LF102"}
+    border_leaves:
+      # Two border leaves sharing vpc_domain form a vPC pair
+      - id: 103
+        name: "LAB1-ACI-LF103"
+        vpc_domain: vpcdom-LAB1
+        csw:
+          name: "LAB1-ACI-CSW01"
+          asn: 65100          # shared enterprise-core AS — BOTH sites' CSW use it (≠ fabric AS 65001/65002)
+          peer_ip: 10.100.0.1 # CSW IP on the peering sub-interface
+          local_ip: 10.100.0.2 # LAB1-ACI-LF103's own IP on the same sub-interface
+          vlan: 100
+      - id: 104
+        name: "LAB1-ACI-LF104"
+        vpc_domain: vpcdom-LAB1
+        csw:
+          name: "LAB1-ACI-CSW01"
+          asn: 65100
+          peer_ip: 10.100.0.1
+          local_ip: 10.100.0.3 # LAB1-ACI-LF104's own IP (different from LF103's)
+          vlan: 100
+    cabling: auto  # auto = full spine×leaf mesh + border-leaf uplinks
+
+  - name: LAB2
+    id: "2"
+    apic_host: "127.0.0.1:8444"
+    mgmt_ip: "10.192.128.11"     # sandbox: LAB2 APIC (subnet 10.192.128.0/25, served on :443)
+    fabric_name: "LAB2-IT-ACI"   # topSystem.fabricDomain → autoACI site grouping/colour
+    asn: 65002
+    pod: 1
+    spines:
+      - {id: 401, name: "LAB2-ACI-SP01"}
+      - {id: 402, name: "LAB2-ACI-SP02"}
+    leaves:
+      - {id: 301, name: "LAB2-ACI-LF301"}
+      - {id: 302, name: "LAB2-ACI-LF302"}
+    border_leaves:
+      - id: 303
+        name: "LAB2-ACI-LF303"
+        vpc_domain: vpcdom-LAB2
+        csw:
+          name: "LAB2-ACI-CSW01"
+          asn: 65100          # same enterprise-core AS as LAB1's CSW (one external AS, two edge routers)
+          peer_ip: 10.200.0.1
+          local_ip: 10.200.0.2
+          vlan: 200
+      - id: 304
+        name: "LAB2-ACI-LF304"
+        vpc_domain: vpcdom-LAB2
+        csw:
+          name: "LAB2-ACI-CSW01"
+          asn: 65100
+          peer_ip: 10.200.0.1
+          local_ip: 10.200.0.3
+          vlan: 200
+    cabling: auto
+
+# ---------------------------------------------------------------------------
+# Inter-Site Network (ISN)
+# ---------------------------------------------------------------------------
+isn:
+  enabled: true
+  peer_mesh: full  # every spine in LAB1 BGP-EVPN peers every spine in LAB2
+  # ---- Tier-2 ISN params (PR-19) — optional, shown here at their schema
+  # defaults (uncomment/edit to override; omitting them is equivalent):
+  # ospf_area: "0.0.0.0"   # OSPF area for the spine<->IPN/ISN uplink (ospfIf.area); "0" also accepted
+  # mtu: 9150              # ISN/IPN inter-site uplink MTU (l1PhysIf.mtu on the dedicated ISN port)
+  # ---- Tier-3 ISN timer params (PR-20) — optional, shown at their schema
+  # defaults (real ACI defaults):
+  # ospf_hello: 10   # OSPF hello timer, seconds -> ospfIf.helloIntvl
+  # ospf_dead: 40    # OSPF dead timer, seconds -> ospfIf.deadIntvl (must exceed ospf_hello)
+  # bfd_min_rx: 50       # BFD min-rx timer, ms (store+validate only — no bfdIfP MO built by this sim)
+  # bfd_min_tx: 50       # BFD min-tx timer, ms (store+validate only)
+  # bfd_multiplier: 3    # BFD detect multiplier, 1-50 (store+validate only)
+
+# ---------------------------------------------------------------------------
+# Tenants
+# ---------------------------------------------------------------------------
+tenants:
+
+  # -------------------------------------------------------------------------
+  # MS-TN1 — multi-site (stretched, NDO-managed) no-firewall tenant, region LAB0
+  # -------------------------------------------------------------------------
+  - name: MS-TN1
+    stretch: true
+    sites: [LAB1, LAB2]
+
+    vrfs:
+      - name: vrf-L3_LAB0
+
+    bds:
+      # Application tier: 10.1.1.0/24, stretched L2
+      - name: bd-BD3_LAB0
+        vrf: vrf-L3_LAB0
+        subnets: ["10.1.1.0/24"]
+        l2stretch: true
+        # mac: "AA:BB:CC:00:00:01"  # Tier-3 (PR-20), optional: per-BD gateway MAC override -> fvBD.mac
+        #                            # (default: fabric.default_bd_mac, itself the real ACI default 00:22:BD:F8:19:FF)
+      # Database tier: 10.1.2.0/24, stretched L2
+      - name: bd-BD4_LAB0
+        vrf: vrf-L3_LAB0
+        subnets: ["10.1.2.0/24"]
+        l2stretch: true
+
+    aps:
+      - name: app-Stretched_Apps_LAB0
+        epgs:
+          - name: epg-APP3_Stretched_BD
+            bd: bd-BD3_LAB0
+            contracts:
+              provide: [con-Web_to_DB_LAB0]
+              consume: []
+          - name: epg-APP4_Stretched_BD
+            bd: bd-BD4_LAB0
+            contracts:
+              provide: []
+              consume: [con-Web_to_DB_LAB0]
+
+    contracts:
+      - name: con-Web_to_DB_LAB0
+        scope: context
+        filters:
+          - name: flt-http_LAB0
+            entries:
+              - proto: tcp
+                from_port: "80"
+                to_port: "80"
+                ether_type: ip
+          - name: flt-https_LAB0
+            entries:
+              - proto: tcp
+                from_port: "443"
+                to_port: "443"
+                ether_type: ip
+
+    l3outs:
+      # LAB1's L3Out → LAB1-ACI-CSW01 via border leaves 103 + 104
+      - name: l3o-bgp-Core_LAB1
+        vrf: vrf-L3_LAB0
+        site: LAB1
+        border_leaves: [103, 104]
+        csw_peer:
+          name: "LAB1-ACI-CSW01"
+          asn: 65100
+          peer_ip: 10.100.0.1
+          # keepalive: 60  # Tier-3 (PR-20), optional: eBGP keepalive timer, seconds -> bgpPeerP.keepAliveIntvl (default 60, real ACI default)
+          # hold: 180      # Tier-3 (PR-20), optional: eBGP hold timer, seconds -> bgpPeerP.holdIntvl (default 180; must exceed keepalive)
+        ext_epgs:
+          - name: xepg-All_LAB1
+            subnets: ["0.0.0.0/0"]
+      # LAB2's L3Out → LAB2-ACI-CSW01 via border leaves 303 + 304
+      - name: l3o-bgp-Core_LAB2
+        vrf: vrf-L3_LAB0
+        site: LAB2
+        border_leaves: [303, 304]
+        csw_peer:
+          name: "LAB2-ACI-CSW01"
+          asn: 65100
+          peer_ip: 10.200.0.1
+        ext_epgs:
+          - name: xepg-All_LAB2
+            subnets: ["0.0.0.0/0"]
+
+  # -------------------------------------------------------------------------
+  # SF-TN1-LAB1 — single-fabric (site-local) no-firewall tenant, LAB1 only
+  # -------------------------------------------------------------------------
+  - name: SF-TN1-LAB1
+    stretch: false
+    sites: [LAB1]
+    vrfs:
+      - name: vrf-L3_LAB1
+    bds:
+      - name: bd-BD1_LAB1
+        vrf: vrf-L3_LAB1
+        subnets: ["192.168.1.0/24"]
+    aps:
+      - name: app-Local_Apps_LAB1
+        epgs:
+          - name: epg-APP2_Local_BD
+            bd: bd-BD1_LAB1
+            contracts:
+              provide: []
+              consume: []
+    contracts: []
+    l3outs: []
+
+  # -------------------------------------------------------------------------
+  # SF-TN1-LAB2 — single-fabric (site-local) no-firewall tenant, LAB2 only
+  # -------------------------------------------------------------------------
+  - name: SF-TN1-LAB2
+    stretch: false
+    sites: [LAB2]
+    vrfs:
+      - name: vrf-L3_LAB2
+    bds:
+      - name: bd-BD1_LAB2
+        vrf: vrf-L3_LAB2
+        subnets: ["192.168.2.0/24"]
+    aps:
+      - name: app-Local_Apps_LAB2
+        epgs:
+          - name: epg-APP2_Local_BD
+            bd: bd-BD1_LAB2
+            contracts:
+              provide: []
+              consume: []
+    contracts: []
+    l3outs: []
+
+# ---------------------------------------------------------------------------
+# Endpoint generation knobs
+# ---------------------------------------------------------------------------
+endpoints:
+  per_epg: 3              # endpoints to generate per EPG per site
+  ip_pool_from_subnet: true  # pick IPs sequentially from BD subnets
+
+# ---------------------------------------------------------------------------
+# Fault seeds + health defaults
+# ---------------------------------------------------------------------------
+faults:
+  seed:
+    - severity: minor
+      code: "F0532"
+      node: 101
+      descr: "Link flap detected on LAB1-ACI-LF101 eth1/1"
+    - severity: warning
+      code: "F0554"
+      node: 102
+      descr: "Interface operational speed mismatch on LAB1-ACI-LF102 eth1/3"
+  health_defaults:
+    node: 95
+    tenant: 98
+
+# ---------------------------------------------------------------------------
+# Access policy (VLAN pools, physical domains, AAEPs)
+# ---------------------------------------------------------------------------
+access:
+  vlan_pools:
+    - name: vlp-general
+      from_vlan: 100
+      to_vlan: 200
+  phys_domains:
+    - name: phy-general
+  l3_domains:
+    - name: l3d-l3out   # bound by l3extRsL3DomAtt in the l3out builder
+  aaeps:
+    - name: aep-general
+  # ---- Tier-2 VMM domains (PR-19) — optional, defaults to an empty list
+  # (no existing builder/production-chain reads a vmmDomP/vmmCtrlrP object
+  # today; see docs/DESIGN.md PR-19 section). Uncomment to add a
+  # vCenter-backed VMM domain:
+  # vmm_domains:
+  #   - name: vmm-vmw-lab1
+  #     vcenter_ip: "10.50.1.10"     # -> vmmCtrlrP.hostOrIp
+  #     vcenter_dvs: "DVS-LAB1"      # -> vmmCtrlrP.dvsName
+  #     datacenter: "DC-LAB1"        # -> vmmCtrlrP.rootContName
+  #     vlan_pool: vlp-general       # must reference an access.vlan_pools[] name above

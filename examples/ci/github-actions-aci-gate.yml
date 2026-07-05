@@ -1,0 +1,65 @@
+# Example GitHub Actions workflow: gate a network-automation change against
+# aci-sim before it can reach real hardware.
+#
+# The pattern is three steps:
+#   1. Start the simulator (in the background, port mode).
+#   2. Run YOUR automation against it (Ansible / Terraform / Python / aci-py).
+#   3. Assert the MIT reached the expected end state (examples/ci/assert_mit.py).
+#      A non-zero exit fails the build.
+#
+# Copy this into .github/workflows/ in the repo that holds your automation,
+# adjust the "Run your automation" and "Assert" steps to your playbook + the
+# objects it is supposed to create, and you have a hardware-free CI gate.
+name: ACI automation gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  aci-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out your automation repo
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ---- 1. Bring up the simulator -------------------------------------
+      - name: Install and start aci-sim
+        run: |
+          pip install "aci-sim @ git+https://github.com/dtzp555-max/aci-sim@v0.8.0"
+          # Or: git clone the repo and `pip install -e .`
+          # Port mode: APIC LAB1 on :8443, LAB2 :8444, NDO :8445 (127.0.0.1).
+          aci-sim run &                 # backgrounds the supervisor
+          # wait for the APIC REST endpoint to answer
+          for i in $(seq 1 30); do
+            curl -sk https://127.0.0.1:8443/api/class/fvTenant.json >/dev/null && break
+            sleep 1
+          done
+
+      # ---- 2. Run YOUR automation against the sim ------------------------
+      #  Replace this with your real playbook / terraform / script.
+      #  It targets the sim exactly like a real APIC (admin/cisco by default).
+      - name: "Run automation (example: cisco.aci playbook)"
+        run: |
+          pip install ansible-core
+          ansible-galaxy collection install cisco.aci
+          ansible-playbook -i inventory.ini create_tenant.yml \
+            -e apic_host=127.0.0.1:8443 -e apic_username=admin -e apic_password=cisco \
+            -e apic_validate_certs=false
+
+      # ---- 3. Gate: assert the MIT end state -----------------------------
+      - name: Assert MIT end state
+        run: |
+          # assert_mit.py ships in the aci-sim repo under examples/ci/.
+          # Vendor it, or curl it, or add the sim repo as a submodule.
+          python assert_mit.py --host 127.0.0.1:8443 \
+            --expect "class:fvTenant>=1" \
+            --expect "mo:uni/tn-YOUR-TENANT" \
+            --expect "attr:uni/tn-YOUR-TENANT:name=YOUR-TENANT"
+          # non-zero exit here fails the PR — your change did not produce the
+          # objects it was supposed to. No hardware was touched.

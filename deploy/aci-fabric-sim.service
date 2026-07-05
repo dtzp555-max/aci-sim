@@ -1,0 +1,31 @@
+[Unit]
+Description=aci-sim — ACI/NDO REST fabric simulator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust to the actual clone path (e.g. /home/YOURUSER/aci-sim). This unit
+# assumes a venv already created at <repo>/.venv (see README.md §2 Quick start).
+WorkingDirectory=%h/aci-sim
+ExecStart=%h/aci-sim/.venv/bin/python -m aci_sim.runtime.supervisor
+Restart=on-failure
+RestartSec=2
+
+# Uncomment to expose the sim on the LAN instead of the loopback-only default
+# (#23 — SIM_BIND defaults to 127.0.0.1). Only do this on a trusted network:
+# the /_sim control plane is always unauthenticated, and the APIC/NDO planes
+# use lab-grade credentials, never real ones.
+#Environment=SIM_BIND=0.0.0.0
+
+# Other overridable knobs (see aci_sim/runtime/config.py); uncomment
+# and adjust as needed:
+#Environment=APIC_A_PORT=8443
+#Environment=APIC_B_PORT=8444
+#Environment=NDO_PORT=8445
+#Environment=TOPOLOGY_PATH=%h/aci-sim/topology.yaml
+#Environment=SIM_USERNAME=admin
+#Environment=SIM_PASSWORD=cisco
+
+[Install]
+WantedBy=default.target
