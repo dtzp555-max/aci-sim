@@ -1,5 +1,14 @@
 """build/fabric.py — fabricNode, topSystem, fabricHealthTotal, vpcDom/vpcIf.
 
+PR-22 addition: ISN CSW lldpAdjEp/cdpAdjEp — one per spine, multi-site only,
+on the spine's dedicated ISN uplink PHYSICAL port eth1/{49+si} (interfaces.py
+builds the l1PhysIf; underlay.py builds the OSPF sub-interface
+eth1/{49+si}.4 on the same base port). This is the third `add_adjacency`
+call site the module docstring in neighbors.py already accounts for
+(fabric.py) — it lives right after the existing APIC↔leaf adjacency loop in
+`build()` below, not a new module, per that docstring's warning against a
+fourth ad-hoc adjacency-construction site.
+
 Batch-2 additions (CONTRACT.md §6 "Fabric/topology", "Infra write targets"; DN/
 attribute shapes verified read-only against autoACI's vpc_status.py/
 health_score.py — see docs/DESIGN.md "Batch-2" section):
@@ -47,6 +56,8 @@ covers every ID our topology.yaml or a hand-authored one could reasonably use).
   overlap with the values the <= 255 branch produces.
 """
 from __future__ import annotations
+
+import zlib
 
 from aci_sim.build.neighbors import add_adjacency, node_mac
 from aci_sim.mit.mo import MO
@@ -257,6 +268,44 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
                 # resolved above for the controller's own topSystem/
                 # firmwareCtrlrRunning), so surface it rather than "".
                 neighbor_version=apic_version,
+            )
+
+    # ISN CSW LLDP neighbor — multi-site only, one per spine's dedicated ISN
+    # uplink PHYSICAL port (eth1/{49+si} — see interfaces.py/underlay.py: the
+    # OSPF logical interface on this port is a routed VLAN-4 sub-interface,
+    # "eth1/{49+si}.4", but real LLDP is advertised on the physical port
+    # itself even when a routed sub-if carries the IP, so this adjacency
+    # deliberately targets the base port, not the sub-if). autoACI's Topology
+    # "Fabric (physical)" view derives this uplink row from ospfIf (port +
+    # local IP) + ospfAdjEp (remote IP) + this lldpAdjEp (CSW-side port), so
+    # without it the neighbor port/name show up blank in that view.
+    if len(topo.sites) > 1:
+        isn_ip = f"172.16.{site.id}.254"
+        for si, spine in enumerate(site.spine_nodes()):
+            add_adjacency(
+                store,
+                pod=pod,
+                local_node_id=spine.id,
+                local_port=f"eth1/{49 + si}",
+                remote_port=f"Ethernet1/{si + 1}",
+                neighbor_name=f"ISN-CSW{site.id}",
+                neighbor_mgmt_ip=isn_ip,
+                neighbor_kind="switch",
+                neighbor_model="N9K-C9364C",
+                neighbor_version="n9000-10.2(5)",
+                # Synthetic chassis MAC for the (simulated, off-fabric) ISN
+                # CSW device — deliberately a DIFFERENT OUI-shaped prefix
+                # ("02:1B:0D", locally-administered per IEEE 802 bit-1-of-
+                # first-octet convention) than node_mac()'s "00:1B:0D" used
+                # for real fabric nodes, so this can never collide with a
+                # spine/leaf/APIC chassis MAC regardless of site.id/node id
+                # overlap. Keyed by site.id (not node id — the ISN CSW is
+                # one device per site, not per spine). site.id is schema-typed
+                # as an unconstrained str, so hash it instead of int()-casting
+                # (a non-numeric id like "east" must not crash the build).
+                neighbor_mac=(
+                    f"02:1B:0D:{zlib.crc32(str(site.id).encode()) & 0xFF:02X}:00:01"
+                ),
             )
 
     # fabricHealthTotal — fabric-wide health summary

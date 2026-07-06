@@ -299,7 +299,7 @@ PR-19: the ISN/IPN spine uplink `l1PhysIf.mtu` is now `isn.mtu`-driven (default 
 `cdpAdjEp`(dn,sysName,mgmtIp,devId,portId,platId,ver,cap) ·
 `lldpInst`🆕(dn,adminSt,name,holdTime,initDelayTime,txFreq,ctrl,optTlvSel) · `lldpIf`🆕(dn has `if-[eth{s}/{p}]`,id,adminRxSt,adminTxSt,operRxSt,operTxSt,mac,portDesc,portVlan,sysDesc,wiring) ·
 `cdpInst`🆕(dn,adminSt,name,holdIntvl,txFreq,ver,ctrl) · `cdpIf`🆕(dn has `if-[eth{s}/{p}]`,id,adminSt,operSt) ·
-`isisAdjEp`(dn,operSt,sysId,lastTrans,numAdjTrans) · `isisDom` · `ospfAdjEp`(dn,operSt,id,peerIp/addr,nbrId,area) · `ospfIf`✅(name,area,state,helloIntvl,deadIntvl) · `arpAdjEp`✅(ip,mac,ifId,physIfId,operSt).
+`isisAdjEp`(dn,operSt,sysId,lastTrans,numAdjTrans) · `isisDom` · `ospfAdjEp`(dn,operSt,id,peerIp/addr,nbrId,area) · `ospfIf`✅(name,area,state,helloIntvl,deadIntvl,addr) · `arpAdjEp`✅(ip,mac,ifId,physIfId,operSt).
 LLDP/CDP fidelity (v0.12.0): `lldpAdjEp`/`cdpAdjEp` are now enriched with real-APIC-shaped fields
 (`portIdV`/`portId` carry the NEIGHBOR's own port; `chassisIdV` is a deterministic per-node MAC,
 see `build/neighbors.py:node_mac`; `sysDesc`/`platId`/`ver` describe the neighbor's model+version, or
@@ -312,6 +312,7 @@ target-subtree-class=lldpAdjEp`) returned `totalCount=0` because the root DN had
 `--json` for machine-readable output).
 PR-19: `ospfIf.area`/`ospfAdjEp.area` are now `isn.ospf_area`-driven (default `"0.0.0.0"`) instead of a hardcoded literal.
 PR-20: `ospfIf.helloIntvl`/`deadIntvl` are new, driven by `isn.ospf_hello`/`isn.ospf_dead` (defaults 10/40, real ACI defaults) — previously not carried on this MO at all.
+PR-22: the ISN-facing `ospfIf`/`ospfAdjEp` on each multi-site spine now sit on a routed VLAN-4 sub-interface (`id`/dn `eth1/{49+si}.4`, was the bare physical port `eth1/{49+si}`) and `ospfIf` gained an `addr` attribute (`172.16.{site.id}.{si+1}/24`) — matching real ACI multi-site spines, which carry the ISN OSPF address on a sub-if rather than the physical port. The underlying physical port's `l1PhysIf`/`ethpmPhysIf` (interfaces.py) are unchanged. Each spine's ISN uplink physical port also gained a simulated `lldpAdjEp`/`cdpAdjEp` (`sysName=ISN-CSW{site.id}`, `portIdV=Ethernet1/{si+1}`, model `N9K-C9364C`) via `build/fabric.py`, the third `add_adjacency` call site — see docs/DESIGN.md's "PR-22" section.
 
 **Overlay/BGP:** `bgpInst`(dn,asn) · `bgpPeer`(dn,asn,addr,type,peerRole) ·
 `bgpPeerEntry`(dn,addr,operSt∈{established,...},rtrId,lastFlapTs,connEst,connDrop,type) ·

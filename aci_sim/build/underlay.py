@@ -64,10 +64,18 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
 
     # OSPF adjacencies — ONLY spine↔IPN/ISN, and ONLY in a multi-site fabric.
     # Leaves never run OSPF to the ISN. One adjacency per spine toward the IPN,
-    # on eth1/{49+si} — interfaces.py builds a matching dedicated ISN uplink
-    # l1PhysIf on each spine (multi-site only) at that exact port, so this
-    # ospfAdjEp interface always resolves against a real port inventory entry.
-    # autoACI reads: iface = dn.split("/if-[")[1]; neighbor = peerIp or nbrId.
+    # modeled on a routed VLAN-4 SUB-INTERFACE of the dedicated ISN uplink port
+    # eth1/{49+si} — i.e. "eth1/{49+si}.4" — matching real ACI multi-site
+    # spines, which carry the ISN-facing OSPF address on a routed sub-if
+    # rather than the bare physical port. interfaces.py builds the underlying
+    # plain-port l1PhysIf/ethpmPhysIf on each spine (multi-site only) at that
+    # exact base port (LLDP/physical state stays there — see interfaces.py's
+    # module docstring); the ospfIf here is a logical child of that port, so
+    # it always resolves against a real port inventory entry via its base
+    # port (ifId.split('.')[0]).
+    # autoACI's fabric_ospf plugin reads ospfIf.id/area/operSt directly; its
+    # topology code matches ospfAdjEp by ifId and falls back to the base port
+    # (ifId.split('.')[0]) to resolve the LLDP neighbor on the physical port.
     if len(topo.sites) > 1:
         ipn_ip = f"172.16.{site.id}.254"  # the IPN/ISN router this site's spines peer with
         # Tier-2 (PR-19): isn.ospf_area feeds ospfIf.area/ospfAdjEp.area — was
@@ -83,12 +91,15 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
         for si, spine in enumerate(site.spine_nodes()):
             ospf_base = f"topology/pod-{pod}/node-{spine.id}/sys/ospf/inst-default/dom-overlay-1"
             store.add(MO("ospfDom", dn=ospf_base, name="overlay-1", operSt="up"))
-            # Batch-1: ospfIf nested between ospfDom and ospfAdjEp — same
-            # eth1/{49+si} ISN uplink port interfaces.py already builds a
-            # dedicated l1PhysIf for, so the existing ospfAdjEp below sits on
-            # a real, matching ospfIf (consumer: autoACI's fabric_ospf.py,
-            # which reads ospfIf.id (falling back to ifId) + area + operSt).
-            if_port = f"eth1/{49 + si}"
+            # Batch-1 (updated): ospfIf nested between ospfDom and ospfAdjEp
+            # is now the routed VLAN-4 sub-interface of the eth1/{49+si} ISN
+            # uplink port interfaces.py builds a dedicated l1PhysIf for — real
+            # ACI multi-site spines carry the ISN-facing OSPF address on this
+            # kind of sub-if, not the bare physical port. `addr` uses the same
+            # /24 as the peer ipn_ip below so the adjacency stays
+            # subnet-consistent (consumer: autoACI's fabric_ospf.py, which
+            # reads ospfIf.id (falling back to ifId) + area + operSt).
+            if_port = f"eth1/{49 + si}.4"
             if_dn = f"{ospf_base}/if-[{if_port}]"
             store.add(MO(
                 "ospfIf",
@@ -98,6 +109,7 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
                 operSt="up",
                 helloIntvl=ospf_hello,
                 deadIntvl=ospf_dead,
+                addr=f"172.16.{site.id}.{si + 1}/24",
             ))
             store.add(MO(
                 "ospfAdjEp",

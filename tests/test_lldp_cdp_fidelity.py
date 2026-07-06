@@ -285,7 +285,7 @@ def test_backward_compat_sysname_and_mgmtip_present(store, site_a):
             assert mo.attrs.get("mgmtIp"), f"{cls} missing mgmtIp: {mo.attrs['dn']}"
 
 
-def test_backward_compat_matches_cabling_graph(store, site_a):
+def test_backward_compat_matches_cabling_graph(store, site_a, topo):
     """Same assertion test_build_fabric.py's test_lldp_cdp_matches_cabling
     already makes (sysName set matches the cabling graph) — re-verified here
     to prove the enrichment didn't alter the pre-existing neighbor set."""
@@ -299,6 +299,11 @@ def test_backward_compat_matches_cabling_graph(store, site_a):
     for cid in range(1, site_a.controllers + 1):
         for leaf in site_a.leaf_nodes()[:2]:
             expected.add((leaf.id, f"{site_a.name}-ACI-APIC{cid:02d}"))
+    # v0.19.0: multi-site fabrics also see the ISN CSW on each spine's
+    # dedicated uplink port (fabric.py's ISN-CSW add_adjacency block).
+    if len(topo.sites) > 1:
+        for spine in site_a.spine_nodes():
+            expected.add((spine.id, f"ISN-CSW{site_a.id}"))
 
     actual: set[tuple[int, str]] = set()
     for mo in store.by_class("lldpAdjEp"):

@@ -105,7 +105,7 @@ def test_fabric_links_reference_real_nodes(store, site_a):
 # Test: LLDP/CDP neighbor set matches cabling graph
 # ---------------------------------------------------------------------------
 
-def test_lldp_cdp_matches_cabling(store, site_a):
+def test_lldp_cdp_matches_cabling(store, site_a, topo):
     """lldpAdjEp sysName values on each node match what the cabling graph predicts."""
     pod = site_a.pod
     node_map = {n.id: n for n in site_a.all_nodes()}
@@ -123,6 +123,12 @@ def test_lldp_cdp_matches_cabling(store, site_a):
     for cid in range(1, site_a.controllers + 1):
         for leaf in site_a.leaf_nodes()[:2]:
             expected_lldp.add((leaf.id, f"{site_a.name}-ACI-APIC{cid:02d}"))
+
+    # v0.19.0: multi-site fabrics also see the ISN CSW on each spine's
+    # dedicated uplink port (fabric.py's ISN-CSW add_adjacency block).
+    if len(topo.sites) > 1:
+        for spine in site_a.spine_nodes():
+            expected_lldp.add((spine.id, f"ISN-CSW{site_a.id}"))
 
     actual_lldp: set[tuple[int, str]] = set()
     for mo in store.by_class("lldpAdjEp"):

@@ -81,7 +81,7 @@ Each sub-builder is `build(topo, site, store)` and only ADDS MOs. `orchestrator.
 Sub-builders (one concern each, <~200 lines):
 - `fabric.py` — fabricNode (roles/ids/model/serial/version from YAML), topSystem, fabricHealthTotal, vpcDom/vpcIf (border-leaf pair), infraWiNode.
 - `cabling.py` — fabricLink (with `/lnk-…/` DN), lldpAdjEp + cdpAdjEp derived STRICTLY from the cabling graph, isisAdjEp.
-- `underlay.py` — bgpInst (local ASN), ospfAdjEp/**ospfIf**✅ (spine↔leaf), IS-IS dom.
+- `underlay.py` — bgpInst (local ASN), ospfAdjEp/**ospfIf**✅ (spine↔ISN, on the routed VLAN-4 sub-if `eth1/{49+si}.4` with `addr` — PR-22; multi-site only), IS-IS dom.
 - `overlay.py` — intra-site BGP-EVPN (spines as RR, leaves as clients): bgpPeer/bgpPeerEntry(established)/bgpPeerAfEntry;
   **ISN**: on each spine's `sys/bgp/inst`, add inter-site bgpPeer with peer addr /32 + remote (other-site) ASN.
 - `endpoints.py` — fvCEp/fvIp distributed across leaves+EPGs (encap/fabricPathDn consistent), epmMacEp/epmIpEp, fvIfConn.
@@ -827,3 +827,46 @@ regression gate this project's acceptance bar calls for (autoACI sandbox e2e, ac
 that gate exists to catch (a hardcoded node-count assertion inside autoACI itself, if one exists, would
 only surface there). The main thread's independent re-run of the real Ansible/aci-py/autoACI chains on
 ACI hardware is the authoritative backward-compat gate for this PR.
+
+## PR-22 — ISN OSPF routed sub-interface + ISN CSW LLDP neighbor
+
+**Design intent:** autoACI's Topology "Fabric (physical)" view derives per-spine ISN uplink rows from
+`ospfIf` (port + local IP), `ospfAdjEp` (remote IP), and `lldpAdjEp` (CSW-side port). Pre-PR-22, the sim
+modeled the ISN-facing `ospfIf` as a **plain interface** (`eth1/{49+si}`) with **no address**, and there
+was no LLDP neighbor on that port at all — so the demo UI showed `Port=eth1/49`, `Local IP=-`,
+`Neighbor Port=-`. Real ACI multi-site spines instead use a **routed sub-interface** (VLAN-4 encap, e.g.
+`eth1/49.4`) that carries the OSPF address, while the ISN switch advertises LLDP on the underlying
+physical port. This PR makes the sim match that reality.
+
+### `build/underlay.py` — `ospfIf` becomes a VLAN-4 routed sub-interface
+
+`ospfIf.id`/dn now read `eth1/{49+si}.4` (was `eth1/{49+si}`), and the MO gained a new `addr` attribute:
+`172.16.{site.id}.{si+1}/24` — the same `/24` as the existing OSPF peer `172.16.{site.id}.254`, so the
+adjacency stays subnet-consistent. `area`/`helloIntvl`/`deadIntvl`/`operSt` are unchanged. `ospfAdjEp`'s
+dn moves under the new sub-if segment (`if-[eth1/{49+si}.4]` instead of `if-[eth1/{49+si}]`); its
+`peerIp`/`nbrId`/`operSt`/`area` attrs are unchanged. The underlying physical port
+(`l1PhysIf`/`ethpmPhysIf`, built by `build/interfaces.py`) is **untouched** — only the OSPF logical
+interface becomes a sub-interface; LLDP/physical port state stays on the plain port, matching real
+hardware (a routed sub-if never carries its own LLDP/physical-layer identity). Consumers resolve the
+underlying port via `ifId.split('.')[0]` — the same fallback autoACI's topology code uses.
+
+### `build/fabric.py` — ISN CSW LLDP/CDP neighbor
+
+Each spine's ISN uplink **physical** port (`eth1/{49+si}`) now gets a simulated LLDP/CDP neighbor via the
+shared `add_adjacency()` helper (`build/neighbors.py`) — the third of that module's three call sites,
+placed directly after the existing APIC↔leaf adjacency loop in `fabric.py`'s `build()`. Fields:
+`sysName=ISN-CSW{site.id}`, `portIdV=Ethernet1/{si+1}` (the CSW's own port numbering), `mgmtIp=
+172.16.{site.id}.254` (the same IP the OSPF adjacency already peers with), `model=N9K-C9364C`,
+`version=n9000-10.2(5)`. The neighbor's chassis MAC uses a deliberately different OUI-shaped prefix
+(`02:1B:0D:...`, locally-administered per the 802 "locally administered" bit) than `node_mac()`'s
+`00:1B:0D:...` used for real fabric/controller nodes, keyed by `site.id` (one ISN CSW device per site,
+not per spine) — this guarantees no collision with any real node's chassis MAC regardless of ID overlap.
+
+Gate: both changes are multi-site only (`len(topo.sites) > 1`, the same condition `underlay.py`'s
+ISN OSPF block already used) — a single-site fabric builds no `ospfDom`/`ospfIf`/`ospfAdjEp` and no
+`lldpAdjEp` named `ISN-CSW*`, unchanged from pre-PR-22 behavior.
+
+New/updated tests: `tests/test_pr19_tier2.py` (`TestIsnOspfSubInterfaceAndLldp` — sub-if id/addr shape,
+`ospfAdjEp` nesting, `lldpAdjEp` fields, single-site negative case);
+`tests/test_pr3b_batch1.py`/`tests/test_pr5_topology_consistency.py` (`ospfIf`/`ospfAdjEp` port-resolution
+assertions updated to strip the `.4` suffix before matching against `l1PhysIf`).

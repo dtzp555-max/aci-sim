@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.19.0] - 2026-07-07
+
+### Changed
+- **Spine ISN-facing OSPF interface is now a routed VLAN-4 sub-interface**
+  (`build/underlay.py`) — real ACI multi-site spines carry the OSPF address
+  toward the IPN/ISN on a routed sub-interface (e.g. `eth1/49.4`), not the
+  bare physical port. `ospfIf.id`/dn now end in `.4` and carry a new `addr`
+  attribute (`172.16.{site.id}.{si+1}/24`, same `/24` as the existing
+  `172.16.{site.id}.254` peer); `ospfAdjEp` nests under the new sub-if
+  segment. The underlying physical port (`eth1/{49+si}`) and its
+  `l1PhysIf`/`ethpmPhysIf` are unchanged — LLDP/physical state stays there,
+  matching real hardware.
+- **ISN CSW LLDP neighbor** (`build/fabric.py`) — each spine's ISN uplink
+  physical port now gets a simulated LLDP neighbor (`lldpAdjEp`/`cdpAdjEp`,
+  via the shared `add_adjacency` helper) representing the inter-site
+  network switch: `sysName=ISN-CSW{site.id}`, `portIdV=Ethernet1/{si+1}`,
+  model `N9K-C9364C`. Together with the sub-interface change above, this
+  closes the gap where autoACI's Topology "Fabric (physical)" view showed
+  `Local IP=-`/`Neighbor Port=-` for spine ISN uplinks — it now derives a
+  complete row from `ospfIf` (port + local IP), `ospfAdjEp` (remote IP),
+  and this `lldpAdjEp` (CSW-side port). Multi-site fabrics only; single-site
+  fabrics build none of this (unchanged: no OSPF/LLDP toward an ISN that
+  doesn't exist). New/updated assertions in `tests/test_pr19_tier2.py`,
+  `tests/test_pr3b_batch1.py`, `tests/test_pr5_topology_consistency.py`.
+
 ## [0.18.1] - 2026-07-07
 
 ### Changed

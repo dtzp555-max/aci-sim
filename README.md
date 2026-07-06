@@ -415,7 +415,9 @@ $ aci-sim show --json | jq '.sites[0].nodes[0]'
 Builds the topology fresh (same builders the sim boots with) and prints a
 **`show lldp neighbors`-style table** of every `lldpAdjEp` adjacency —
 i.e. the neighbor relationships the cabling in `topology.yaml` implies
-(spine<->leaf links, APIC<->leaf attachment), materialized exactly the way
+(spine<->leaf links, APIC<->leaf attachment, plus — multi-site only — each
+spine's ISN uplink toward the inter-site switch, `ISN-CSW{site}`),
+materialized exactly the way
 they'd appear on a running sim (§10's LLDP/CDP fidelity). Pass `--cdp` to
 read `cdpAdjEp` instead. This does not start any server — it's a static,
 read-only view of one freshly-built site (or all sites).

@@ -88,6 +88,82 @@ class TestIsnDefaults:
 
 
 # ---------------------------------------------------------------------------
+# PR-22 — ISN OSPF sub-interface + ISN CSW LLDP neighbor
+#
+# Real ACI multi-site spines carry the ISN-facing OSPF address on a routed
+# VLAN-4 sub-interface (e.g. "eth1/49.4"), not the bare physical port, and
+# the ISN switch advertises LLDP on that physical port. autoACI's Topology
+# "Fabric (physical)" view stitches these together: ospfIf (port + local IP)
+# + ospfAdjEp (remote IP) + lldpAdjEp (CSW-side port/name).
+# ---------------------------------------------------------------------------
+
+
+class TestIsnOspfSubInterfaceAndLldp:
+    def test_ospfIf_id_is_vlan4_subinterface(self, repo_topo: Topology) -> None:
+        site = repo_topo.site_by_name("LAB1")
+        store = orchestrator.build_site(repo_topo, site)
+        ospf_ifs = store.by_class("ospfIf")
+        assert ospf_ifs, "expected at least one ospfIf"
+        spine_ids = sorted(n.id for n in site.spine_nodes())
+        for si, sid in enumerate(spine_ids):
+            expected_id = f"eth1/{49 + si}.4"
+            mo = next(
+                m for m in ospf_ifs
+                if m.dn == f"topology/pod-{site.pod}/node-{sid}/sys/ospf/inst-default/dom-overlay-1/if-[{expected_id}]"
+            )
+            assert mo.attrs["id"] == expected_id
+
+    def test_ospfIf_addr_in_site_isn_subnet(self, repo_topo: Topology) -> None:
+        site = repo_topo.site_by_name("LAB1")
+        store = orchestrator.build_site(repo_topo, site)
+        ospf_ifs = store.by_class("ospfIf")
+        assert ospf_ifs
+        for mo in ospf_ifs:
+            assert mo.attrs["addr"].startswith(f"172.16.{site.id}.")
+            assert mo.attrs["addr"].endswith("/24")
+
+    def test_ospfAdjEp_dn_nests_under_subinterface_segment(self, repo_topo: Topology) -> None:
+        site = repo_topo.site_by_name("LAB1")
+        store = orchestrator.build_site(repo_topo, site)
+        spine_ids = sorted(n.id for n in site.spine_nodes())
+        for si, sid in enumerate(spine_ids):
+            expected_segment = f"if-[eth1/{49 + si}.4]"
+            adj = next(
+                m for m in store.by_class("ospfAdjEp")
+                if f"/node-{sid}/" in m.dn and expected_segment in m.dn
+            )
+            assert adj.attrs["peerIp"] == f"172.16.{site.id}.254"
+
+    def test_lldpAdjEp_exists_for_isn_csw_on_physical_port(self, repo_topo: Topology) -> None:
+        site = repo_topo.site_by_name("LAB1")
+        store = orchestrator.build_site(repo_topo, site)
+        spine_ids = sorted(n.id for n in site.spine_nodes())
+        lldp_adjs = list(store.by_class("lldpAdjEp"))
+        for si, sid in enumerate(spine_ids):
+            local_port = f"eth1/{49 + si}"
+            adj = next(
+                m for m in lldp_adjs
+                if m.dn == f"topology/pod-{site.pod}/node-{sid}/sys/lldp/inst/if-[{local_port}]/adj-1"
+            )
+            assert adj.attrs["sysName"] == f"ISN-CSW{site.id}"
+            assert adj.attrs["portIdV"] == f"Ethernet1/{si + 1}"
+            assert adj.attrs["mgmtIp"] == f"172.16.{site.id}.254"
+
+    def test_single_site_fabric_builds_no_isn_ospf_or_lldp(self) -> None:
+        """Single-site fabrics never peer OSPF/LLDP with an ISN — no ospfIf/
+        ospfAdjEp/ospfDom, and no lldpAdjEp named "ISN-CSW*", should exist."""
+        topo_dict = generate_topology(sites=1, leaves_per_site=1, spines_per_site=1, border_pairs=0)
+        topo = Topology.model_validate(topo_dict)
+        site = topo.sites[0]
+        store = orchestrator.build_site(topo, site)
+        assert store.by_class("ospfIf") == []
+        assert store.by_class("ospfAdjEp") == []
+        assert store.by_class("ospfDom") == []
+        isn_lldp = [m for m in store.by_class("lldpAdjEp") if "ISN-CSW" in m.attrs.get("sysName", "")]
+        assert isn_lldp == []
+
+
+# ---------------------------------------------------------------------------
 # ISN ospf_area / mtu — overrides
 # ---------------------------------------------------------------------------
 
