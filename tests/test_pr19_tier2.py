@@ -91,8 +91,9 @@ class TestIsnDefaults:
 # PR-22 — ISN OSPF sub-interface + ISN CSW LLDP neighbor
 #
 # Real ACI multi-site spines carry the ISN-facing OSPF address on a routed
-# VLAN-4 sub-interface (e.g. "eth1/49.4"), not the bare physical port, and
-# the ISN switch advertises LLDP on that physical port. autoACI's Topology
+# VLAN-4 sub-interface NAMED AFTER THE PORT (e.g. "eth1/49.49" — real spine
+# CLI shows Eth1/29.29-style names; only the ISN Nexus side names its dot1q-4
+# sub-if ".4", e.g. "Ethernet1/1.4"), not the bare physical port. autoACI's Topology
 # "Fabric (physical)" view stitches these together: ospfIf (port + local IP)
 # + ospfAdjEp (remote IP) + lldpAdjEp (CSW-side port/name).
 # ---------------------------------------------------------------------------
@@ -106,7 +107,7 @@ class TestIsnOspfSubInterfaceAndLldp:
         assert ospf_ifs, "expected at least one ospfIf"
         spine_ids = sorted(n.id for n in site.spine_nodes())
         for si, sid in enumerate(spine_ids):
-            expected_id = f"eth1/{49 + si}.4"
+            expected_id = f"eth1/{49 + si}.{49 + si}"
             mo = next(
                 m for m in ospf_ifs
                 if m.dn == f"topology/pod-{site.pod}/node-{sid}/sys/ospf/inst-default/dom-overlay-1/if-[{expected_id}]"
@@ -127,7 +128,7 @@ class TestIsnOspfSubInterfaceAndLldp:
         store = orchestrator.build_site(repo_topo, site)
         spine_ids = sorted(n.id for n in site.spine_nodes())
         for si, sid in enumerate(spine_ids):
-            expected_segment = f"if-[eth1/{49 + si}.4]"
+            expected_segment = f"if-[eth1/{49 + si}.{49 + si}]"
             adj = next(
                 m for m in store.by_class("ospfAdjEp")
                 if f"/node-{sid}/" in m.dn and expected_segment in m.dn
@@ -146,7 +147,7 @@ class TestIsnOspfSubInterfaceAndLldp:
                 if m.dn == f"topology/pod-{site.pod}/node-{sid}/sys/lldp/inst/if-[{local_port}]/adj-1"
             )
             assert adj.attrs["sysName"] == f"ISN-CSW{site.id}"
-            assert adj.attrs["portIdV"] == f"Ethernet1/{si + 1}"
+            assert adj.attrs["portIdV"] == f"Ethernet1/{si + 1}.4"
             assert adj.attrs["mgmtIp"] == f"172.16.{site.id}.254"
 
     def test_single_site_fabric_builds_no_isn_ospf_or_lldp(self) -> None:

@@ -95,11 +95,15 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
             # is now the routed VLAN-4 sub-interface of the eth1/{49+si} ISN
             # uplink port interfaces.py builds a dedicated l1PhysIf for — real
             # ACI multi-site spines carry the ISN-facing OSPF address on this
-            # kind of sub-if, not the bare physical port. `addr` uses the same
-            # /24 as the peer ipn_ip below so the adjacency stays
+            # kind of sub-if, not the bare physical port. NAMING (verified
+            # against real spine CLI, e.g. "Eth1/29.29"/"Eth1/33.33" in
+            # `show ip ospf neighbors vrf overlay-1`): the ACI-side sub-if
+            # NUMBER equals the PORT number — the encap is always vlan-4 but
+            # only the IPN/ISN-router side names its sub-if ".4". `addr` uses
+            # the same /24 as the peer ipn_ip below so the adjacency stays
             # subnet-consistent (consumer: autoACI's fabric_ospf.py, which
             # reads ospfIf.id (falling back to ifId) + area + operSt).
-            if_port = f"eth1/{49 + si}.4"
+            if_port = f"eth1/{49 + si}.{49 + si}"
             if_dn = f"{ospf_base}/if-[{if_port}]"
             store.add(MO(
                 "ospfIf",

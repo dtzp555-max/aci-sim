@@ -127,9 +127,10 @@ def test_l3out_path_att_references_real_port(store_name, request):
 @pytest.mark.parametrize("store_name", ["store_a", "store_b"])
 def test_ospf_adjacency_references_real_port(store_name, request):
     """ospfAdjEp nests under the ospfIf's VLAN-4 sub-if segment
-    (if-[eth1/{49+si}.4]); resolve the underlying l1PhysIf via the base port
-    (ifId.split('.')[0]) — same fallback autoACI's topology code uses since
-    real LLDP/physical state stays on the base port, not the sub-if."""
+    (if-[eth1/{49+si}.{49+si}], port-named per real ACI convention); resolve
+    the underlying l1PhysIf via the base port (ifId.split('.')[0]) — same
+    fallback autoACI's topology code uses since real LLDP/physical state
+    stays on the base port, not the sub-if."""
     store = request.getfixturevalue(store_name)
     ports = _l1physif_ports(store)
     adjs = list(store.by_class("ospfAdjEp"))
@@ -138,8 +139,10 @@ def test_ospf_adjacency_references_real_port(store_name, request):
         m = re.search(r"/node-(\d+)/sys/ospf/.*?/if-\[([^\]]+)\]", adj.dn)
         assert m is not None, f"unparsable ospfAdjEp dn {adj.dn!r}"
         node_id, port_id = int(m.group(1)), m.group(2)
-        assert port_id.endswith(".4"), f"ospfAdjEp {adj.dn!r} port {port_id!r} is not a VLAN-4 sub-if"
-        base_port = port_id.split(".")[0]
+        base_port, _, sub_num = port_id.partition(".")
+        assert sub_num == base_port.split("/")[-1], (
+            f"ospfAdjEp {adj.dn!r} port {port_id!r} is not a port-named sub-if"
+        )
         assert base_port in ports.get(node_id, set()), (
             f"ospfAdjEp {adj.dn!r} references base port {base_port!r} on node {node_id}, "
             f"which has no matching l1PhysIf (has {ports.get(node_id)})"

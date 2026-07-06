@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.19.1] - 2026-07-07
+
+### Fixed
+- **ISN sub-interface naming conventions flipped to match real gear** (owner
+  review of the v0.19.0 demo, verified against Cisco docs/real spine CLI):
+  the ACI spine names its VLAN-4 sub-if after the PORT (`eth1/49.49`,
+  cf. `Eth1/29.29`-style output in `show ip ospf neighbors vrf overlay-1`),
+  while the ISN Nexus names its dot1q-4 sub-if after the VLAN
+  (`Ethernet1/1.4`). v0.19.0 had it backwards (spine `.4`, CSW bare
+  physical): `ospfIf`/`ospfAdjEp` ids/dns now use the port-named form and
+  the ISN-CSW `lldpAdjEp.portIdV` gained the `.4` suffix.
+
 ## [0.19.0] - 2026-07-07
 
 ### Changed

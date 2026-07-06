@@ -406,10 +406,11 @@ def test_ospf_adj_ep_sits_on_an_ospf_if(store_name, request):
 @pytest.mark.parametrize("store_name", _ALL_STORES)
 def test_ospf_if_references_real_port(store_name, request):
     """ospfIf is now the routed VLAN-4 sub-interface of the spine's ISN
-    uplink port (id/dn end in ".4", e.g. "eth1/49.4") — real LLDP/physical
-    port state stays on the base port, so this resolves the underlying
-    l1PhysIf via the base port (ifId.split('.')[0]), same fallback autoACI's
-    topology code uses."""
+    uplink port, named after the port per real ACI convention (e.g.
+    "eth1/49.49" — cf. Eth1/29.29-style names in real spine CLI) — real
+    LLDP/physical port state stays on the base port, so this resolves the
+    underlying l1PhysIf via the base port (ifId.split('.')[0]), same
+    fallback autoACI's topology code uses."""
     store = request.getfixturevalue(store_name)
     ports = _l1physif_ports(store)
     ifs = store.by_class("ospfIf")
@@ -418,8 +419,10 @@ def test_ospf_if_references_real_port(store_name, request):
         m = re.search(r"/node-(\d+)/sys/ospf/.*?/if-\[([^\]]+)\]", ospf_if.dn)
         assert m is not None, f"unparsable ospfIf dn {ospf_if.dn!r}"
         node_id, port_id = int(m.group(1)), m.group(2)
-        assert port_id.endswith(".4"), f"ospfIf {ospf_if.dn!r} id {port_id!r} is not a VLAN-4 sub-if"
-        base_port = port_id.split(".")[0]
+        base_port, _, sub_num = port_id.partition(".")
+        assert sub_num == base_port.split("/")[-1], (
+            f"ospfIf {ospf_if.dn!r} id {port_id!r} is not a port-named sub-if"
+        )
         assert base_port in ports.get(node_id, set()), (
             f"ospfIf {ospf_if.dn!r} references base port {base_port!r} on node "
             f"{node_id}, which has no matching l1PhysIf"

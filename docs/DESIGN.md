@@ -81,7 +81,7 @@ Each sub-builder is `build(topo, site, store)` and only ADDS MOs. `orchestrator.
 Sub-builders (one concern each, <~200 lines):
 - `fabric.py` — fabricNode (roles/ids/model/serial/version from YAML), topSystem, fabricHealthTotal, vpcDom/vpcIf (border-leaf pair), infraWiNode.
 - `cabling.py` — fabricLink (with `/lnk-…/` DN), lldpAdjEp + cdpAdjEp derived STRICTLY from the cabling graph, isisAdjEp.
-- `underlay.py` — bgpInst (local ASN), ospfAdjEp/**ospfIf**✅ (spine↔ISN, on the routed VLAN-4 sub-if `eth1/{49+si}.4` with `addr` — PR-22; multi-site only), IS-IS dom.
+- `underlay.py` — bgpInst (local ASN), ospfAdjEp/**ospfIf**✅ (spine↔ISN, on the routed VLAN-4 sub-if `eth1/{49+si}.{49+si}` (port-named) with `addr` — PR-22; multi-site only), IS-IS dom.
 - `overlay.py` — intra-site BGP-EVPN (spines as RR, leaves as clients): bgpPeer/bgpPeerEntry(established)/bgpPeerAfEntry;
   **ISN**: on each spine's `sys/bgp/inst`, add inter-site bgpPeer with peer addr /32 + remote (other-site) ASN.
 - `endpoints.py` — fvCEp/fvIp distributed across leaves+EPGs (encap/fabricPathDn consistent), epmMacEp/epmIpEp, fvIfConn.
@@ -835,15 +835,15 @@ ACI hardware is the authoritative backward-compat gate for this PR.
 modeled the ISN-facing `ospfIf` as a **plain interface** (`eth1/{49+si}`) with **no address**, and there
 was no LLDP neighbor on that port at all — so the demo UI showed `Port=eth1/49`, `Local IP=-`,
 `Neighbor Port=-`. Real ACI multi-site spines instead use a **routed sub-interface** (VLAN-4 encap, e.g.
-`eth1/49.4`) that carries the OSPF address, while the ISN switch advertises LLDP on the underlying
+`eth1/49.49`, port-named per real spine CLI) that carries the OSPF address, while the ISN switch advertises LLDP on the underlying
 physical port. This PR makes the sim match that reality.
 
 ### `build/underlay.py` — `ospfIf` becomes a VLAN-4 routed sub-interface
 
-`ospfIf.id`/dn now read `eth1/{49+si}.4` (was `eth1/{49+si}`), and the MO gained a new `addr` attribute:
+`ospfIf.id`/dn now read `eth1/{49+si}.{49+si}` (was `eth1/{49+si}`), and the MO gained a new `addr` attribute:
 `172.16.{site.id}.{si+1}/24` — the same `/24` as the existing OSPF peer `172.16.{site.id}.254`, so the
 adjacency stays subnet-consistent. `area`/`helloIntvl`/`deadIntvl`/`operSt` are unchanged. `ospfAdjEp`'s
-dn moves under the new sub-if segment (`if-[eth1/{49+si}.4]` instead of `if-[eth1/{49+si}]`); its
+dn moves under the new sub-if segment (`if-[eth1/{49+si}.{49+si}]` instead of `if-[eth1/{49+si}]`); its
 `peerIp`/`nbrId`/`operSt`/`area` attrs are unchanged. The underlying physical port
 (`l1PhysIf`/`ethpmPhysIf`, built by `build/interfaces.py`) is **untouched** — only the OSPF logical
 interface becomes a sub-interface; LLDP/physical port state stays on the plain port, matching real

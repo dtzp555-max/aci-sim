@@ -273,12 +273,14 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
     # ISN CSW LLDP neighbor — multi-site only, one per spine's dedicated ISN
     # uplink PHYSICAL port (eth1/{49+si} — see interfaces.py/underlay.py: the
     # OSPF logical interface on this port is a routed VLAN-4 sub-interface,
-    # "eth1/{49+si}.4", but real LLDP is advertised on the physical port
-    # itself even when a routed sub-if carries the IP, so this adjacency
-    # deliberately targets the base port, not the sub-if). autoACI's Topology
-    # "Fabric (physical)" view derives this uplink row from ospfIf (port +
-    # local IP) + ospfAdjEp (remote IP) + this lldpAdjEp (CSW-side port), so
-    # without it the neighbor port/name show up blank in that view.
+    # "eth1/{49+si}.{49+si}" per the ACI naming convention, but LLDP itself is
+    # advertised per physical port, so this adjacency targets the base port).
+    # The CSW-side port-id follows the IPN/ISN Nexus convention — a dot1q-4
+    # routed sub-interface named after the VLAN ("Ethernet1/x.4", e.g. real
+    # IPN configs `interface Ethernet1/1.4` + `encapsulation dot1q 4`).
+    # autoACI's Topology "Fabric (physical)" view derives this uplink row from
+    # ospfIf (port + local IP) + ospfAdjEp (remote IP) + this lldpAdjEp
+    # (CSW-side port), so without it the neighbor port/name show up blank.
     if len(topo.sites) > 1:
         isn_ip = f"172.16.{site.id}.254"
         for si, spine in enumerate(site.spine_nodes()):
@@ -287,7 +289,7 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
                 pod=pod,
                 local_node_id=spine.id,
                 local_port=f"eth1/{49 + si}",
-                remote_port=f"Ethernet1/{si + 1}",
+                remote_port=f"Ethernet1/{si + 1}.4",
                 neighbor_name=f"ISN-CSW{site.id}",
                 neighbor_mgmt_ip=isn_ip,
                 neighbor_kind="switch",
