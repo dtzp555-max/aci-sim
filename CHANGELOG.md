@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.18.0] - 2026-07-06
+
+### Added
+- **Runtime tenant-L3Out eBGP session materialization** — a tenant L3Out
+  pushed live via `POST /api/mo` (cisco.aci playbooks / aci-py) lands
+  `bgpPeerP` (config) through the generic write path, which never produced
+  the operational session MOs. `writes.py` now reacts to every runtime
+  `bgpPeerP` by materializing `bgpPeer`/`bgpPeerEntry`(`operSt=established`)/
+  `bgpPeerAfEntry` under a `dom-{tenant}:{vrf}` BGP domain on the L3Out's own
+  node — the peer ASN derived from the nested `bgpAsP`, the VRF from the
+  L3Out's `l3extRsEctx.tnFvCtxName` (skips cleanly when no VRF is bound, or
+  on `status=deleted`). This mirrors what `build/l3out.py` already does for
+  topology-defined L3Outs, and makes per-tenant L3Out BGP session views in
+  API clients (e.g. autoACI's "L3Out BGP" topology table) populate for
+  runtime-pushed tenants. New regression tests in
+  `tests/test_l3out_bgp_session.py` (903 tests total).
+
 ## [0.17.0] - 2026-07-05
 
 ### Added

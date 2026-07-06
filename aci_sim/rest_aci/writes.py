@@ -7,6 +7,7 @@ import re
 from aci_sim.build.fabric import loopback_ip, oob_ip
 from aci_sim.build.interfaces import _HOST_PORTS, _UPLINK_START, _add_port
 from aci_sim.build.neighbors import add_switch_adjacency
+from aci_sim.mit.dn import pod_from_dn
 from aci_sim.mit.mo import MO
 from aci_sim.mit.store import MITStore
 from aci_sim.topology.schema import Node
@@ -419,6 +420,102 @@ def materialize_node_registration(
         )
 
 
+_BGP_PEERP_RE = re.compile(
+    r"uni/tn-(?P<tenant>[^/]+)/out-(?P<l3out>[^/]+)/.*"
+    r"paths-(?P<node>\d+)/pathep-\[[^\]]+\]\]/peerP-\[(?P<peer>[^\]]+)\]$"
+)
+
+
+def _materialize_l3out_bgp_session(
+    store: MITStore, peer_dn: str, addr: str, remote_asn: str
+) -> None:
+    """Reaction: a tenant L3Out ``bgpPeerP`` (config) was POSTed — materialize
+    the matching operational session MOs (``bgpPeer``/``bgpPeerEntry``/
+    ``bgpPeerAfEntry``) so autoACI's ``_compute_session_tables`` (routers/
+    topology.py) L3Out BGP table finds it, exactly like the boot-time
+    topology-driven path already does for its own L3Outs (build/l3out.py's
+    ``_upsert_ebgp_sessions``) — this covers the OTHER path, a tenant config
+    pushed live via POST /api/mo (cisco.aci ansible playbook / hidden_push.py),
+    which lands generic MOs here in writes.py instead of going through the
+    topology builders.
+
+    DN/attribute derivation (verified against routers/topology.py's
+    ``_compute_session_tables``, ``_dn_dom`` and ``_dn_node`` helpers):
+      - node: parsed from the bgpPeerP's own DN (".../paths-{N}/pathep-...")
+        — this IS the L3Out border-leaf, same node the peer is deployed on.
+      - dom: MUST be ``dom-{tenant}:{vrf}`` (colon-separated) — topology.py's
+        ``_dn_dom`` extracts the dom segment verbatim and then does
+        ``if ":" not in dom: continue`` to skip fabric/overlay (``dom-
+        overlay-1``) peers, then ``tenant, _, vrf = dom.partition(":")``.
+        vrf is read from the L3Out's own ``l3extRsEctx.tnFvCtxName`` (already
+        in the store from the earlier ``aci_l3out`` POST) rather than
+        hardcoded, so it always matches whatever VRF the tenant push used.
+      - remoteAsn: topology.py reads it off the sibling ``bgpPeer.asn``
+        attribute (matched via the entry's parent dn) — sourced from the
+        bgpPeerP's own nested ``bgpAsP.asn`` child, i.e. the L3Out's actual
+        configured peer ASN, never hardcoded.
+    """
+    m = _BGP_PEERP_RE.match(peer_dn)
+    if not m:
+        return
+    tenant = m.group("tenant")
+    l3out_name = m.group("l3out")
+    node_id = m.group("node")
+
+    l3out_dn = f"uni/tn-{tenant}/out-{l3out_name}"
+    vrf = ""
+    for ectx in store.children(l3out_dn, {"l3extRsEctx"}):
+        vrf = ectx.attrs.get("tnFvCtxName", "")
+        if vrf:
+            break
+    if not vrf:
+        # Can't place this peer under a tenant-VRF dom without a VRF name —
+        # nothing sane to derive it from, so skip rather than fudge a dom
+        # that would silently misclassify as fabric/overlay (no ":").
+        return
+
+    pod = pod_from_dn(peer_dn)
+    inst_dn = f"topology/pod-{pod}/node-{node_id}/sys/bgp/inst"
+    inst_mo = MO("bgpInst", dn=inst_dn)
+
+    dom_name = f"{tenant}:{vrf}"
+    dom_dn = f"{inst_dn}/dom-{dom_name}"
+    dom_mo = MO("bgpDom", dn=dom_dn, name=dom_name)
+
+    session_peer_dn = f"{dom_dn}/peer-[{addr}]"
+    peer_mo = MO(
+        "bgpPeer",
+        dn=session_peer_dn,
+        addr=addr,
+        asn=remote_asn,
+        type="ebgp",
+        peerRole="ce",
+    )
+    entry_dn = f"{session_peer_dn}/ent-[{addr}]"
+    peer_mo.add_child(MO(
+        "bgpPeerEntry",
+        dn=entry_dn,
+        addr=addr,
+        operSt="established",
+        connEst="1",
+        connDrop="0",
+        type="ebgp",
+    ))
+    af_dn = f"{entry_dn}/af-[ipv4-ucast]"
+    peer_mo.add_child(MO(
+        "bgpPeerAfEntry",
+        dn=af_dn,
+        type="ipv4-ucast",
+        afId="ipv4-ucast",
+        acceptedPaths="3",
+        pfxSent="3",
+        tblVer="1",
+    ))
+    dom_mo.add_child(peer_mo)
+    inst_mo.add_child(dom_mo)
+    store.upsert(inst_mo)
+
+
 def apply(store: MITStore, dn: str, body: dict, *, topo=None, site=None) -> tuple[list[dict], int]:
     """Apply a write (upsert or delete) from a POST /api/mo/{dn}.json body.
 
@@ -463,6 +560,29 @@ def apply(store: MITStore, dn: str, body: dict, *, topo=None, site=None) -> tupl
             materialize_node_registration(
                 store, topo=topo, site=site, node_id=node_id, name=name, role=role,
             )
+
+    # Tenant L3Out eBGP peer (bgpPeerP) reaction: materialize the operational
+    # bgpPeer/bgpPeerEntry/bgpPeerAfEntry session MOs so autoACI's L3Out BGP
+    # table (routers/topology.py) finds it — see _materialize_l3out_bgp_session
+    # docstring. bgpAsP (the peer ASN) is POSTed as bgpPeerP's own nested
+    # child in the SAME body (cisco.aci's tenant.yml task), so it is already
+    # in this same `planned` list — read it from there instead of a second
+    # store lookup.
+    for mo_cls, mo_attrs in planned:
+        if mo_cls != "bgpPeerP":
+            continue
+        if mo_attrs.get("status") == "deleted":
+            continue
+        peer_dn = mo_attrs.get("dn", "")
+        addr = mo_attrs.get("addr", "")
+        if not peer_dn or not addr:
+            continue
+        remote_asn = ""
+        for as_cls, as_attrs in planned:
+            if as_cls == "bgpAsP" and as_attrs.get("dn", "").startswith(f"{peer_dn}/"):
+                remote_asn = as_attrs.get("asn", "")
+                break
+        _materialize_l3out_bgp_session(store, peer_dn, addr, remote_asn)
 
     status = "deleted" if attrs.get("status") == "deleted" else "created"
     result = [{cls: {"attributes": {"dn": effective_dn, "status": status}}}]
