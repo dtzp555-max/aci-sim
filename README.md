@@ -5,7 +5,8 @@ run Ansible `cisco.aci` playbooks, ACI SDKs, or an AI agent against it like
 real gear, with no hardware required.
 
 [![CI](https://github.com/dtzp555-max/aci-sim/actions/workflows/ci.yml/badge.svg)](https://github.com/dtzp555-max/aci-sim/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial-blue.svg)](LICENSE)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/dtzp555)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](pyproject.toml)
 
 A faithful REST **simulator of a 2-site Cisco ACI fabric** — a per-site APIC
@@ -1180,4 +1181,8 @@ via plain pytest.
 
 ## License
 
-MIT — see `LICENSE`.
+PolyForm Noncommercial 1.0.0 — free for personal, lab, research, and any other
+noncommercial use. Commercial use needs my permission first. See `LICENSE`.
+
+Built nights and weekends. If aci-sim saves you a lab, you can
+[buy me a coffee](https://buymeacoffee.com/dtzp555). ☕

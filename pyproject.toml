@@ -1,16 +1,16 @@
 [project]
 name = "aci-sim"
-version = "0.18.0"
+version = "0.18.1"
 description = "Faithful REST simulator of a 2-site Cisco ACI fabric (per-site APIC + ND/NDO)"
 readme = "README.md"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0"
 authors = [
     { name = "aci-sim contributors" },
 ]
 requires-python = ">=3.11"
 classifiers = [
-    # No "License :: OSI Approved :: MIT License" classifier: the SPDX
-    # `license = "MIT"` field above supersedes license classifiers (PEP 639)
+    # No license classifier: the SPDX `license` field above supersedes
+    # license classifiers (PEP 639)
     # and modern setuptools rejects having both.
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
