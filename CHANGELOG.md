@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.20.4] - 2026-07-07
+
+### Docs
+- README: added a Platforms section — Linux (x86-64/ARM incl. Raspberry Pi OS,
+  Debian, Ubuntu) and macOS (Apple Silicon/Intel), Python 3.11+; both verified
+  with the full test suite (macOS re-verified at v0.20.3: fresh clone from the
+  public repo, 908 tests green). Sandbox mode is Linux/macOS-only (root);
+  Windows untested.
+
 ## [0.20.3] - 2026-07-07
 
 ### Fixed
