@@ -21,6 +21,17 @@ entire fabric — nodes, tenants, VRFs/BDs/EPGs, contracts, L3Outs, faults,
 endpoints, and the whole NDO schema tree — is generated deterministically
 from a single `topology.yaml`.
 
+> **What it simulates (and what it doesn't):** aci-sim simulates the
+> **management plane** — the REST API and the operational state a converged
+> fabric would report. It does **not** run routing protocols: OSPF/BGP/LLDP
+> state (`operSt=full`, `established`, adjacencies, /31 link addressing) is
+> **materialized from configuration, not computed** — push the config and the
+> matching operational MOs appear, exactly as your automation would read them
+> off a healthy fabric. That's why the cisco.aci/cisco.mso collections and
+> API clients work unmodified, and why the whole thing runs on a Raspberry
+> Pi 4 — and also why it can't test convergence, failover timing, or actual
+> traffic forwarding.
+
 ![aci-sim topology](docs/images/topology.png)
 
 *A 2-site, 15-node fabric rendered by `aci-sim graph` — spines (blue),
