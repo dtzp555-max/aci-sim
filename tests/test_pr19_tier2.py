@@ -119,9 +119,12 @@ class TestIsnOspfSubInterfaceAndLldp:
         store = orchestrator.build_site(repo_topo, site)
         ospf_ifs = store.by_class("ospfIf")
         assert ospf_ifs
-        for mo in ospf_ifs:
-            assert mo.attrs["addr"].startswith(f"172.16.{site.id}.")
-            assert mo.attrs["addr"].endswith("/24")
+        spine_ids = sorted(n.id for n in site.spine_nodes())
+        for si, sid in enumerate(spine_ids):
+            mo = next(m for m in ospf_ifs if f"/node-{sid}/" in m.dn)
+            # Per-link /31 point-to-point (Cisco Multi-Site design guide):
+            # spine si owns 172.16.{site}.{2*si}/31, IPN peer is .{2*si+1}.
+            assert mo.attrs["addr"] == f"172.16.{site.id}.{2 * si}/31"
 
     def test_ospfAdjEp_dn_nests_under_subinterface_segment(self, repo_topo: Topology) -> None:
         site = repo_topo.site_by_name("LAB1")
@@ -133,7 +136,7 @@ class TestIsnOspfSubInterfaceAndLldp:
                 m for m in store.by_class("ospfAdjEp")
                 if f"/node-{sid}/" in m.dn and expected_segment in m.dn
             )
-            assert adj.attrs["peerIp"] == f"172.16.{site.id}.254"
+            assert adj.attrs["peerIp"] == f"172.16.{site.id}.{2 * si + 1}"
 
     def test_lldpAdjEp_exists_for_isn_csw_on_physical_port(self, repo_topo: Topology) -> None:
         site = repo_topo.site_by_name("LAB1")

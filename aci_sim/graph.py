@@ -288,8 +288,53 @@ def _legend_svg(x: float, y: float, roles_present: list[str]) -> str:
             f'fill="{fill}" stroke="{border}" stroke-width="1"/>'
             f'<text x="{lx + swatch + 6}" y="{swatch - 2}" class="legend-label">{escape(LEGEND_LABELS[role])}</text>'
         )
+    # Link-type samples (mirrors autoACI's topology legend): fabric links,
+    # solid ISN uplink, dashed vPC peer-link.
+    lx = len(roles_present) * gap + 20
+    line_entries = [("link-cabling", "Fabric link"), ("link-isn", "ISN uplink"), ("link-vpc", "vPC peer-link")]
+    for cls, label in line_entries:
+        parts.append(
+            f'<line x1="{lx}" y1="{swatch / 2:.0f}" x2="{lx + 26}" y2="{swatch / 2:.0f}" class="{cls}"/>'
+            f'<text x="{lx + 32}" y="{swatch - 2}" class="legend-label">{escape(label)}</text>'
+        )
+        lx += 130
     parts.append("</g>")
     return "".join(parts)
+
+
+def _links_table_svg(topo: Topology, x: float, y: float) -> tuple[str, int]:
+    """Physical-links table under the diagram (same logic as autoACI's
+    Topology "Fabric (physical)" session table): one row per cabling link and
+    per spine ISN uplink, with the /31 point-to-point IPs on the ISN rows."""
+    from aci_sim.build.cabling import cabling_links
+
+    cols = [("SITE", 0), ("NODE", 110), ("PORT", 260), ("NEIGHBOR", 350), ("NBR PORT", 500), ("LOCAL IP", 610), ("REMOTE IP", 730)]
+    row_h = 15
+    rows: list[tuple[str, ...]] = []
+    for site in topo.sites:
+        names = {n.id: n.name for n in site.all_nodes()}
+        for n1, _s1, p1, n2, _s2, p2 in cabling_links(site):
+            rows.append((site.name, names.get(n1, str(n1)), f"eth1/{p1}", names.get(n2, str(n2)), f"eth1/{p2}", "\u2014", "\u2014"))
+    if topo.isn.enabled and len(topo.sites) > 1:
+        for site in topo.sites:
+            for si, spine in enumerate(site.spine_nodes()):
+                rows.append((
+                    site.name, spine.name, f"eth1/{49 + si}.{49 + si}",
+                    f"ISN-CSW{site.id}", f"Ethernet1/{si + 1}.4",
+                    f"172.16.{site.id}.{2 * si}/31", f"172.16.{site.id}.{2 * si + 1}",
+                ))
+    parts = [f'<g transform="translate({x:.1f},{y:.1f})">',
+             '<text x="0" y="0" class="tbl-title">Physical links</text>']
+    hy = 18
+    for label, cx in cols:
+        parts.append(f'<text x="{cx}" y="{hy}" class="tbl-head">{escape(label)}</text>')
+    for i, row in enumerate(rows):
+        ry = hy + (i + 1) * row_h
+        for (label, cx), val in zip(cols, row):
+            parts.append(f'<text x="{cx}" y="{ry}" class="tbl-cell">{escape(val)}</text>')
+    parts.append("</g>")
+    height = hy + (len(rows) + 1) * row_h + 10
+    return "".join(parts), height
 
 
 def _svg_style() -> str:
@@ -301,9 +346,12 @@ def _svg_style() -> str:
         f".subtitle-text {{ font-family: {FONT}; font-size: 11px; fill: #64748b; }}"
         ".node-shadow { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.25)); }"
         ".link-cabling { stroke: #d1d5db; stroke-width: 1.5; opacity: 0.8; }"
-        ".link-isn { stroke: #f59e0b; stroke-width: 1.5; stroke-dasharray: 5,4; opacity: 0.85; }"
+        ".link-isn { stroke: #f59e0b; stroke-width: 2; opacity: 0.9; }"
         ".link-vpc { stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 2,3; opacity: 0.7; }"
         ".site-label { font-family: " + FONT + "; font-size: 12px; font-weight: 600; fill: #64748b; }"
+        + ".tbl-head { font-family: " + FONT + "; font-size: 10px; font-weight: 700; fill: #475569; }"
+        + ".tbl-cell { font-family: " + FONT + "; font-size: 10px; fill: #334155; }"
+        + ".tbl-title { font-family: " + FONT + "; font-size: 12px; font-weight: 700; fill: #0f172a; }"
         "</style>"
     )
 
@@ -344,6 +392,9 @@ def _svg_body(graph: Graph, topo: Topology) -> tuple[str, int, int]:
     legend_y = height - LEGEND_H + 16
     legend_svg = _legend_svg(MARGIN, legend_y, roles_present)
 
+    table_svg, table_h = _links_table_svg(topo, MARGIN, height + 6)
+    height += table_h
+
     body = (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
         f'width="{width}" height="{height}" font-family="{FONT}">'
@@ -353,6 +404,7 @@ def _svg_body(graph: Graph, topo: Topology) -> tuple[str, int, int]:
         + links_svg
         + nodes_svg
         + legend_svg
+        + table_svg
         + "</svg>"
     )
     return body, width, height

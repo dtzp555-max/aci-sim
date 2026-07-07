@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.20.0] - 2026-07-07
+
+### Changed
+- **Spine-to-ISN underlay is now /31 point-to-point** (per the Cisco ACI
+  Multi-Site design guide) — each spine's ISN-facing VLAN-4 sub-interface
+  gets its own /31 pair (`172.16.{site}.{2*si}/31`, IPN peer `.{2*si+1}`)
+  instead of the previous shared `/24` LAN segment with a single `.254`
+  IPN router. `ospfIf.addr` and each `ospfAdjEp` peer reflect the per-link
+  pair; the ISN CSW's LLDP mgmt address is unchanged (a device-level
+  management IP, not an interface address).
+- **`aci-sim graph` now mirrors the autoACI topology view logic**: ISN
+  uplinks are drawn solid (they are physical backbone links, dashes are for
+  overlays), the legend gains link-type entries (fabric link / ISN uplink /
+  vPC peer-link), and a **Physical links table** is rendered under the
+  diagram — one row per fabric link and per spine ISN uplink, the ISN rows
+  carrying the /31 local/remote IPs.
+
 ## [0.19.1] - 2026-07-07
 
 ### Fixed

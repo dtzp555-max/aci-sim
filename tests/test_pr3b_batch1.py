@@ -429,8 +429,10 @@ def test_ospf_if_references_real_port(store_name, request):
         )
         assert ospf_if.attrs.get("id") == port_id
         addr = ospf_if.attrs.get("addr", "")
-        assert re.fullmatch(r"172\.16\.\d+\.\d+/24", addr), (
-            f"ospfIf {ospf_if.dn!r} addr {addr!r} is not a 172.16.{{site}}.0/24 address"
+        assert re.fullmatch(r"172\.16\.\d+\.\d+/31", addr), (
+            f"ospfIf {ospf_if.dn!r} addr {addr!r} is not a point-to-point "
+            f"172.16.{{site}}.x/31 address (Cisco Multi-Site: spine-to-IPN "
+            f"links are /31 or /30 p2p sub-interfaces, not a shared LAN)"
         )
 
 

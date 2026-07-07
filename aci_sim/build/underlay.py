@@ -77,7 +77,12 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
     # topology code matches ospfAdjEp by ifId and falls back to the base port
     # (ifId.split('.')[0]) to resolve the LLDP neighbor on the physical port.
     if len(topo.sites) > 1:
-        ipn_ip = f"172.16.{site.id}.254"  # the IPN/ISN router this site's spines peer with
+        # Point-to-point /31 per spine uplink (RFC 3021), matching the Cisco
+        # ACI Multi-Site design guide: each spine's ISN/IPN-facing routed
+        # VLAN-4 sub-interface is its own point-to-point subnet (/31 or /30),
+        # NOT a shared LAN segment — the IPN router's side of each link is the
+        # other address of the /31 pair. Scheme: spine si gets
+        # 172.16.{site.id}.{2*si}/31 locally, the IPN peer is .{2*si+1}.
         # Tier-2 (PR-19): isn.ospf_area feeds ospfIf.area/ospfAdjEp.area — was
         # a hardcoded "0.0.0.0" literal; a topology author overriding
         # isn.ospf_area now sees it reflected in the actual OSPF object
@@ -99,11 +104,13 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
             # against real spine CLI, e.g. "Eth1/29.29"/"Eth1/33.33" in
             # `show ip ospf neighbors vrf overlay-1`): the ACI-side sub-if
             # NUMBER equals the PORT number — the encap is always vlan-4 but
-            # only the IPN/ISN-router side names its sub-if ".4". `addr` uses
-            # the same /24 as the peer ipn_ip below so the adjacency stays
-            # subnet-consistent (consumer: autoACI's fabric_ospf.py, which
-            # reads ospfIf.id (falling back to ifId) + area + operSt).
+            # only the IPN/ISN-router side names its sub-if ".4". `addr` is
+            # this link's /31 point-to-point address; the ospfAdjEp peer below
+            # is the other half of the pair (consumer: autoACI's fabric_ospf.py,
+            # which reads ospfIf.id (falling back to ifId) + area + operSt).
             if_port = f"eth1/{49 + si}.{49 + si}"
+            local_ip = f"172.16.{site.id}.{2 * si}"
+            ipn_peer_ip = f"172.16.{site.id}.{2 * si + 1}"
             if_dn = f"{ospf_base}/if-[{if_port}]"
             store.add(MO(
                 "ospfIf",
@@ -113,10 +120,10 @@ def build(topo: Topology, site: Site, store: MITStore) -> None:
                 operSt="up",
                 helloIntvl=ospf_hello,
                 deadIntvl=ospf_dead,
-                addr=f"172.16.{site.id}.{si + 1}/24",
+                addr=f"{local_ip}/31",
             ))
             store.add(MO(
                 "ospfAdjEp",
-                dn=f"{if_dn}/adj-[{ipn_ip}]",
-                operSt="full", peerIp=ipn_ip, nbrId=ipn_ip, area=ospf_area,
+                dn=f"{if_dn}/adj-[{ipn_peer_ip}]",
+                operSt="full", peerIp=ipn_peer_ip, nbrId=ipn_peer_ip, area=ospf_area,
             ))
