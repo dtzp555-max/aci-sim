@@ -494,3 +494,62 @@ def test_app_level_undeploy_via_task_body():
         assert resp.status_code == 200
 
     assert apic_states["1"].store.get(f"uni/tn-{TENANT_NAME}/ap-AP1/epg-Web") is None
+
+
+# ---------------------------------------------------------------------------
+# Contract/filter/service-graph shadow mirroring (2026-07-07 gap: vzBrCP=0
+# fabric-wide while mirrored EPGs carried fvRsProv/fvRsCons to those names)
+# ---------------------------------------------------------------------------
+
+
+def _firewall_template(state) -> None:
+    template = state.schema_details[SCHEMA_ID]["templates"][0]
+    template["filters"] = [{
+        "name": "flt-permit_ip_LAB0",
+        "entries": [{"name": "permit_ip", "etherType": "ip", "ipProtocol": "unspecified"}],
+    }]
+    template["serviceGraphs"] = [{"name": "sgt-FW_LAB0"}]
+    template["contracts"] = [{
+        "name": "con-Firewall_LAB0",
+        "scope": "context",
+        "filterRelationships": [
+            {"filterRef": f"/schemas/{SCHEMA_ID}/templates/{TEMPLATE_NAME}/filters/flt-permit_ip_LAB0"}
+        ],
+        "serviceGraphRelationship": {
+            "serviceGraphRef": f"/schemas/{SCHEMA_ID}/templates/{TEMPLATE_NAME}/serviceGraphs/sgt-FW_LAB0"
+        },
+    }]
+
+
+def test_mirror_materializes_contract_shadows() -> None:
+    state = _build_state()
+    _firewall_template(state)
+    apic = _FakeApicState()
+    mirror_template_to_sites(state, TEMPLATE_NAME, {"1": apic}, schema_id=SCHEMA_ID)
+    store = apic.store
+    tn = f"uni/tn-{TENANT_NAME}"
+    con_dn = f"{tn}/brc-con-Firewall_LAB0"
+    subj_dn = f"{con_dn}/subj-sub-Firewall_LAB0"
+    assert store.get(con_dn) is not None
+    assert store.get(con_dn).attrs["scope"] == "context"
+    assert store.get(subj_dn) is not None
+    filt_att = store.get(f"{subj_dn}/rssubjFiltAtt-flt-permit_ip_LAB0")
+    assert filt_att is not None and filt_att.attrs["tnVzFilterName"] == "flt-permit_ip_LAB0"
+    graph_att = store.get(f"{subj_dn}/rsSubjGraphAtt")
+    assert graph_att is not None and graph_att.attrs["tnVnsAbsGraphName"] == "sgt-FW_LAB0"
+    assert store.get(f"{tn}/flt-flt-permit_ip_LAB0") is not None
+    assert store.get(f"{tn}/flt-flt-permit_ip_LAB0/e-permit_ip") is not None
+    assert store.get(f"{tn}/AbsGraph-sgt-FW_LAB0") is not None
+
+
+def test_undeploy_removes_contract_shadows() -> None:
+    state = _build_state()
+    _firewall_template(state)
+    apic = _FakeApicState()
+    mirror_template_to_sites(state, TEMPLATE_NAME, {"1": apic}, schema_id=SCHEMA_ID)
+    tn = f"uni/tn-{TENANT_NAME}"
+    assert apic.store.get(f"{tn}/brc-con-Firewall_LAB0") is not None
+    mirror_template_to_sites(state, TEMPLATE_NAME, {"1": apic}, schema_id=SCHEMA_ID, undeploy=True)
+    assert apic.store.get(f"{tn}/brc-con-Firewall_LAB0") is None
+    assert apic.store.get(f"{tn}/flt-flt-permit_ip_LAB0") is None
+    assert apic.store.get(f"{tn}/AbsGraph-sgt-FW_LAB0") is None

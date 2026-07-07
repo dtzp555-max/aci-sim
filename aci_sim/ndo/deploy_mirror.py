@@ -314,7 +314,95 @@ def _template_object_dns(tenant: str, template: dict) -> list[tuple[str, str]]:
             epg_name = epg.get("name") if isinstance(epg, dict) else None
             if epg_name:
                 dns.append((f"uni/tn-{tenant}/ap-{anp_name}/epg-{epg_name}", "fvAEPg"))
+    for flt in template.get("filters", []) or []:
+        name = flt.get("name") if isinstance(flt, dict) else None
+        if name:
+            dns.append((f"uni/tn-{tenant}/flt-{name}", "vzFilter"))
+    for con in template.get("contracts", []) or []:
+        name = con.get("name") if isinstance(con, dict) else None
+        if name:
+            dns.append((f"uni/tn-{tenant}/brc-{name}", "vzBrCP"))
+    for graph in template.get("serviceGraphs", []) or []:
+        name = graph.get("name") if isinstance(graph, dict) else None
+        if name:
+            dns.append((f"uni/tn-{tenant}/AbsGraph-{name}", "vnsAbsGraph"))
     return dns
+
+
+def _mirror_contracts(store: MITStore, tenant: str, template: dict) -> int:
+    """Mirror the template's filters/contracts/service-graphs into a site
+    APIC store as their shadow MOs (vzFilter/vzEntry, vzBrCP/vzSubj + the
+    filter and service-graph subject bindings, vnsAbsGraph).
+
+    A real NDO deploy creates these shadow objects on every target site's
+    APIC; without them the mirrored EPGs' fvRsProv/fvRsCons are DANGLING
+    references — same family as F1 (children/relations exist, the referenced
+    object MO doesn't), surfaced 2026-07-07 when `GET /api/class/vzBrCP`
+    returned 0 fabric-wide despite deployed MS tenants providing/consuming
+    contracts. Shadow-subject naming: one vzSubj per contract, named after
+    the contract ("con-X" -> "sub-X"), carrying the filter attachments and
+    the service-graph binding (tnVnsAbsGraphName) when the NDO contract has
+    a serviceGraphRelationship."""
+    written = 0
+    for flt in template.get("filters", []) or []:
+        if not isinstance(flt, dict) or not flt.get("name"):
+            continue
+        flt_name = flt["name"]
+        flt_dn = f"uni/tn-{tenant}/flt-{flt_name}"
+        store.upsert(MO("vzFilter", dn=flt_dn, name=flt_name))
+        written += 1
+        for entry in flt.get("entries", []) or []:
+            if not isinstance(entry, dict) or not entry.get("name"):
+                continue
+            store.upsert(MO(
+                "vzEntry",
+                dn=f"{flt_dn}/e-{entry['name']}",
+                name=entry["name"],
+                etherT=entry.get("etherType", "unspecified"),
+                prot=entry.get("ipProtocol", "unspecified"),
+            ))
+            written += 1
+    for con in template.get("contracts", []) or []:
+        if not isinstance(con, dict) or not con.get("name"):
+            continue
+        con_name = con["name"]
+        con_dn = f"uni/tn-{tenant}/brc-{con_name}"
+        store.upsert(MO("vzBrCP", dn=con_dn, name=con_name, scope=con.get("scope", "context")))
+        written += 1
+        subj_name = f"sub-{con_name[4:]}" if con_name.startswith("con-") else f"sub-{con_name}"
+        subj_dn = f"{con_dn}/subj-{subj_name}"
+        store.upsert(MO("vzSubj", dn=subj_dn, name=subj_name))
+        written += 1
+        for rel in con.get("filterRelationships", []) or []:
+            ref = rel.get("filterRef", "") if isinstance(rel, dict) else ""
+            rel_flt = _basename(ref)
+            if not rel_flt:
+                continue
+            store.upsert(MO(
+                "vzRsSubjFiltAtt",
+                dn=f"{subj_dn}/rssubjFiltAtt-{rel_flt}",
+                tnVzFilterName=rel_flt,
+            ))
+            written += 1
+        graph_rel = con.get("serviceGraphRelationship") or {}
+        graph_name = _basename(graph_rel.get("serviceGraphRef", "")) if isinstance(graph_rel, dict) else ""
+        if graph_name:
+            store.upsert(MO(
+                "vzRsSubjGraphAtt",
+                dn=f"{subj_dn}/rsSubjGraphAtt",
+                tnVnsAbsGraphName=graph_name,
+            ))
+            written += 1
+    for graph in template.get("serviceGraphs", []) or []:
+        if not isinstance(graph, dict) or not graph.get("name"):
+            continue
+        store.upsert(MO(
+            "vnsAbsGraph",
+            dn=f"uni/tn-{tenant}/AbsGraph-{graph['name']}",
+            name=graph["name"],
+        ))
+        written += 1
+    return written
 
 
 def mirror_template_to_sites(
@@ -431,5 +519,9 @@ def mirror_template_to_sites(
                 site_epg = _find_site_epg(site_entry, anp_name, epg_name)
                 _mirror_epg(store, tenant, anp_name, epg, site_epg)
                 written += 1
+
+        # Contract/filter/service-graph shadows for this site — see
+        # _mirror_contracts (dangling fvRsProv/fvRsCons fix).
+        written += _mirror_contracts(store, tenant, template)
 
     return written

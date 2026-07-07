@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 
 from aci_sim.build.fabric import loopback_ip, oob_ip
@@ -213,6 +214,39 @@ def _validate_node(cls: str, body: dict, path: str) -> None:
         _validate_node(child_cls, child_body, child_path)
 
 
+def _validate_planned(planned: list[tuple[str, dict]]) -> None:
+    """Reject malformed property values a real APIC would 400 on (error-801
+    style) — e.g. ``fvSubnet ip=".1/24"`` or ``vnsRedirectDest ip="."``, the
+    exact garbage an unguarded J2 template renders when its input vars are
+    missing. The sim's contract is to FAIL the way real gear fails, not to
+    absorb it into the MIT. Only values actually PRESENT on a non-delete
+    write are validated (a delete needs nothing but the DN — that stays the
+    cleanup path for anything malformed that predates this check)."""
+    for mo_cls, mo_attrs in planned:
+        if mo_attrs.get("status") == "deleted":
+            continue
+        if mo_cls in ("fvSubnet", "l3extSubnet"):
+            ip = mo_attrs.get("ip")
+            if ip is not None:
+                try:
+                    ipaddress.ip_interface(ip)
+                except ValueError:
+                    raise WriteValidationError(
+                        f"Invalid value {ip!r} for property 'ip' of {mo_cls} "
+                        f"{mo_attrs.get('dn', '')!r}: not a valid address[/prefix]"
+                    ) from None
+        elif mo_cls == "vnsRedirectDest":
+            ip = mo_attrs.get("ip")
+            if ip is not None:
+                try:
+                    ipaddress.ip_address(ip)
+                except ValueError:
+                    raise WriteValidationError(
+                        f"Invalid value {ip!r} for property 'ip' of vnsRedirectDest "
+                        f"{mo_attrs.get('dn', '')!r}: not a valid IP address"
+                    ) from None
+
+
 def _plan_recursive(cls: str, attrs: dict, children: list, planned: list[tuple[str, dict]]) -> None:
     """Build the ordered list of (class, attrs) MOs to write, without touching the store.
 
@@ -253,6 +287,7 @@ def _upsert_recursive(store: MITStore, cls: str, attrs: dict, children: list) ->
 
     planned: list[tuple[str, dict]] = []
     _plan_recursive(cls, attrs, children, planned)
+    _validate_planned(planned)  # reject malformed values BEFORE any store mutation
 
     # Validation passed for the entire subtree — now, and only now, mutate
     # the store (400 on validation failure => zero side effects).

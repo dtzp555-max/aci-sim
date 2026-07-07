@@ -197,6 +197,23 @@ def _build_result(
         page_items = _paginate(flat, params.page, params.page_size)
         return [mo.to_imdata() for mo in page_items], total
 
+    # query-target=children (real APIC): scope = the DIRECT children of each
+    # matched root — root itself excluded — returned as FLAT top-level imdata
+    # entries; target-subtree-class and query-target-filter apply per child.
+    # (Was previously unsupported and silently returned empty imdata, which
+    # reads as "object has no children" — a verification false-negative.)
+    if params.query_target == "children" and params.rsp_subtree is None:
+        cls_filter = _subtree_classes(params)
+        flat_children: list[MO] = []
+        for root in top_level:
+            for mo in store.children(root.dn):
+                if cls_filter is None or mo.class_name in cls_filter:
+                    flat_children.append(mo)
+        flat_children = [mo for mo in flat_children if pred(mo)]
+        total = len(flat_children)
+        page_items = _paginate(flat_children, params.page, params.page_size)
+        return [mo.to_imdata() for mo in page_items], total
+
     # Modern rsp-subtree=children|full: NESTED children under each matched object.
     filtered = [mo for mo in top_level if pred(mo)]
     total = len(filtered)

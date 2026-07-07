@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.21.0] - 2026-07-07
+
+### Added
+- **Write validation — fail like real gear**: `POST /api/mo` now rejects
+  malformed property values with an APIC-style 400 instead of absorbing
+  them into the MIT: `fvSubnet`/`l3extSubnet` `ip` must be a valid
+  address[/prefix], `vnsRedirectDest` `ip` a valid IP. (Surfaced by a TN2
+  push whose var file was missing the firewall block: the unguarded J2
+  template rendered `ip=".1/24"` and `ip="."` and the sim accepted both.)
+  Deletes are exempt — cleanup only needs the DN.
+- **`query-target=children`** on MO/class queries (real-APIC semantics:
+  the DIRECT children of each matched root as flat imdata, root excluded,
+  `target-subtree-class` honored). Previously unsupported and silently
+  answered with empty imdata — a verification false-negative.
+- **Deploy mirror: contract/filter/service-graph shadows** — an NDO deploy
+  now also materializes `vzFilter`/`vzEntry`, `vzBrCP`/`vzSubj` (+
+  `vzRsSubjFiltAtt`, and `vzRsSubjGraphAtt` when the NDO contract carries a
+  serviceGraphRelationship) and `vnsAbsGraph` on every target site's APIC.
+  Previously the mirrored EPGs' `fvRsProv`/`fvRsCons` were dangling
+  references (`GET /api/class/vzBrCP` returned 0 fabric-wide) — same family
+  as the F1 fvTenant-root gap. Undeploy tears the shadows down.
+
 ## [0.20.5] - 2026-07-07
 
 ### Docs
