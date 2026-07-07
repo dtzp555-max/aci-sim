@@ -1,6 +1,6 @@
 [project]
 name = "aci-sim"
-version = "0.20.4"
+version = "0.20.5"
 description = "Faithful REST simulator of a 2-site Cisco ACI fabric (per-site APIC + ND/NDO)"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -19,6 +19,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Networking",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",

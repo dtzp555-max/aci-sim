@@ -41,7 +41,9 @@ the /31 point-to-point ISN addressing. See §5's `aci-sim graph` for how to gene
 
 **Platforms** — Linux (x86-64 & ARM: Raspberry Pi OS, Debian, Ubuntu — a
 Raspberry Pi 4 is enough) and macOS (Apple Silicon & Intel). Python 3.11+.
-The full test suite runs green on both. The default port mode runs anywhere
+The full test suite runs green on both (verified through Python 3.14, on
+Apple Silicon and Intel). Note macOS's bundled `python3` is often 3.9 —
+install 3.11+ from python.org or Homebrew first. The default port mode runs anywhere
 Python does; sandbox mode (real management IPs on `:443`) needs root and is
 Linux/macOS only. Windows is untested.
 
