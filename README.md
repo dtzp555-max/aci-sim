@@ -36,7 +36,8 @@ from a single `topology.yaml`.
 
 *A 2-site, 15-node fabric rendered by `aci-sim graph` — spines (blue),
 leaves/border-leaves (green), controllers (amber), and the inter-site ISN
-cloud (slate). See §5's `aci-sim graph` for how to generate your own.*
+cloud (slate) — solid orange ISN uplinks, plus a physical-links table with
+the /31 point-to-point ISN addressing. See §5's `aci-sim graph` for how to generate your own.*
 
 ### 60-second quickstart
 

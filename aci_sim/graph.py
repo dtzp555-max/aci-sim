@@ -368,6 +368,11 @@ def _svg_body(graph: Graph, topo: Topology) -> tuple[str, int, int]:
         max_x = max_y = 0.0
 
     width = int(max_x - min_x + 2 * MARGIN)
+    # A narrow diagram (few nodes) must still fit the single-row legend
+    # (role swatches at 150px pitch + three link-type samples at 130px) —
+    # otherwise the ISN-uplink/vPC legend entries clip off the right edge.
+    _roles_n = len([r for r in LEGEND_ORDER if any(n.role == r for n in graph.nodes)])
+    width = max(width, int(2 * MARGIN + _roles_n * 150 + 20 + 3 * 130))
     height = int(max_y - min_y + 2 * MARGIN + TITLE_H + LEGEND_H)
 
     # Shift everything so the drawing starts at (MARGIN, MARGIN + TITLE_H).

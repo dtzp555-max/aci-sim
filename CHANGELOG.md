@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.20.2] - 2026-07-07
+
+### Fixed
+- `aci-sim graph`: the single-row legend (role swatches + link-type samples)
+  clipped off the right edge on narrow diagrams (few nodes) — the SVG width
+  now accounts for the legend's minimum width.
+
+### Docs
+- README: regenerated the embedded topology diagram with the v0.20 renderer
+  (solid ISN uplinks, link-type legend, physical-links table with /31
+  point-to-point ISN addressing) + caption updated.
+
 ## [0.20.1] - 2026-07-07
 
 ### Docs
