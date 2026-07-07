@@ -166,8 +166,11 @@ def _layout(graph: Graph, topo: Topology) -> None:
     """Hand-computed tiered ACI hierarchy layout (mirrors autoACI's preset layout).
 
     Tiers (top to bottom): ISN cloud (multi-site only) -> spine -> leaf ->
-    border-leaf -> controller. Sites are spread side by side; each tier's
-    nodes are centered within their site's horizontal band.
+    controller. Border leaves share the LEAF row (placed to its right) —
+    exactly like autoACI's topology view: a separate border-leaf tier under
+    the leaves reads as a bogus three-tier "leaf under leaf" hierarchy.
+    Sites are spread side by side; each tier's nodes are centered within
+    their site's horizontal band.
     """
     site_names = [s.name for s in topo.sites]
     multi_site = len(site_names) > 1
@@ -194,16 +197,16 @@ def _layout(graph: Graph, topo: Topology) -> None:
     y_isn = 0.0
     y_spine = V_GAP * 1 if not multi_site else V_GAP * 1.6
     y_leaf = y_spine + V_GAP
-    y_border = y_leaf + V_GAP
-    y_ctrl = y_border + V_GAP
+    y_ctrl = y_leaf + V_GAP
 
     for idx, name in enumerate(site_names):
         site_x = idx * SITE_GAP + idx * H_GAP * 2  # extra spread accounts for wide tiers
         tiers = by_site[name]
         # Recompute site_x based on the widest tier so sites don't overlap.
         place_row(tiers["spine"], site_x, y_spine)
-        place_row(tiers["leaf"], site_x, y_leaf)
-        place_row(tiers["border-leaf"], site_x, y_border)
+        # Leaves + border leaves share one row (borders to the right, i.e.
+        # ascending node-id order), mirroring autoACI's single leaf tier.
+        place_row(tiers["leaf"] + tiers["border-leaf"], site_x, y_leaf)
         place_row(tiers["controller"], site_x, y_ctrl)
 
     # Second pass: re-center each site block using the actual widest tier so

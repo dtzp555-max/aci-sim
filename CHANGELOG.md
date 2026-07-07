@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.20.3] - 2026-07-07
+
+### Fixed
+- `aci-sim graph`: border leaves now share the LEAF row (placed to its
+  right), matching autoACI's topology view — the previous separate
+  border-leaf tier under the leaves read as a bogus three-tier
+  "leaf under leaf" hierarchy. README diagram regenerated.
+
 ## [0.20.2] - 2026-07-07
 
 ### Fixed
