@@ -28,6 +28,8 @@ import hashlib
 import re
 from typing import Any
 
+from aci_sim.rest_aci.validators import Validator, fmt, rng
+
 #: Every collection key a schema template can carry. Real NDO always serves
 #: these back as (at minimum) empty lists even when a caller's create/add
 #: payload omitted them — e.g. `mso_schema_template.py`'s "schema does not
@@ -79,6 +81,77 @@ CHILD_OBJECT_DEFAULTS: dict[str, dict[str, Any]] = {
 
 class PatchError(Exception):
     """Raised when a JSON-Patch op cannot be applied to the stored document."""
+
+
+# ---------------------------------------------------------------------------
+# F10 batch 3 — NDO value validation (design doc §3.3).
+#
+# NDO stores schema JSON, not APIC MOs, so values arrive as JSON-Patch
+# add/replace op values rather than (class, prop) MO attrs — the RULES
+# registry keying in aci_sim/rest_aci/validators.py doesn't apply verbatim.
+# Instead NDO_RULES keys on (collection, field): *collection* is the name of
+# the array a value is being written into/under (e.g. "subnets",
+# "staticPorts" — the dict key one level up from the array itself), *field*
+# is the attribute name within that array's object shape.
+#
+# The NDO value surface is much narrower than APIC's (design §3.3: "subnet
+# ip, static-port vlan, a few vrf/bd enums") — this batch implements exactly
+# the two the design doc calls out by name: subnet ip and static-port VLAN.
+# The real `cisco.mso` field for the static-port VLAN is `portEncapVlan`
+# (confirmed against this repo's own PR-12 test fixtures,
+# tests/test_pr12_site_local.py — the design doc's pseudocode used the
+# placeholder name "vlan"; `portEncapVlan` is the actual wire field).
+# ---------------------------------------------------------------------------
+NDO_RULES: dict[tuple[str, str], Validator] = {
+    ("subnets", "ip"): fmt("ipv4_iface"),
+    ("staticPorts", "portEncapVlan"): rng(1, 4094),
+}
+
+
+def _validate_ndo_value(collection: str, field: str, value: Any) -> None:
+    """Look up *collection*/*field* in NDO_RULES and raise PatchError if
+    *value* fails it. Fail-safe default-allow, same policy as the APIC
+    registry: an unregistered (collection, field) or a None value is not
+    validated."""
+    validator = NDO_RULES.get((collection, field))
+    if validator is None or value is None:
+        return
+    try:
+        validator(collection, field, value, None)
+    except ValueError as reason:
+        raise PatchError(
+            f"Invalid value {value!r} for property {field!r} of {collection!r}: {reason}"
+        ) from None
+
+
+def _validate_ndo_op(tokens: list[str], container: Any, last: str, value: Any) -> None:
+    """Validate a single JSON-Patch add/replace op's *value* against
+    NDO_RULES, given the already-resolved (container, last) from
+    ``_resolve_container`` and the op's full *tokens* path.
+
+    Two value shapes reach here (design §3.3 "applied to each op's value"):
+
+      - Whole-object add/insert (``container`` is the collection list
+        itself, e.g. ``.../subnets/-`` or ``.../staticPorts/-``): *value* is
+        a dict of fields for the new item. The collection name is the token
+        that named this list, i.e. ``tokens[-2]`` (the list was reached by
+        indexing into ``doc[...][tokens[-2]]``). Validate every field of
+        *value* that NDO_RULES knows about.
+      - Single-field replace/add on an EXISTING item (``container`` is that
+        item's own dict, e.g. ``.../subnets/0/ip``): *last* IS the field
+        name and *value* is the scalar. The collection name is one level up
+        again — ``tokens[-3]`` (the list containing the item ``tokens[-2]``
+        indexes into).
+    """
+    if isinstance(container, list):
+        collection = tokens[-2] if len(tokens) >= 2 else None
+        if collection is not None and isinstance(value, dict):
+            for field, sub_value in value.items():
+                _validate_ndo_value(collection, field, sub_value)
+    elif isinstance(container, dict):
+        collection = tokens[-3] if len(tokens) >= 3 else None
+        if collection is not None:
+            _validate_ndo_value(collection, last, value)
 
 
 def _normalize_object(obj: dict, array_key: str, schema_id: str, template_name: str, anp_name: str = "") -> None:
@@ -694,6 +767,12 @@ def apply_json_patch(doc: dict, ops: list[dict]) -> dict:
             continue
 
         container, last = _resolve_container(doc, tokens)
+
+        if op in ("add", "replace"):
+            # F10 batch 3: validate before mutating (design §3.3) — a bad
+            # subnet ip / static-port vlan 400s instead of landing in the
+            # stored schema doc.
+            _validate_ndo_op(tokens, container, last, value)
 
         if op == "add":
             if isinstance(container, list):

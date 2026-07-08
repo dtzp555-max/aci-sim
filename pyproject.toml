@@ -1,6 +1,6 @@
 [project]
 name = "aci-sim"
-version = "0.22.0"
+version = "0.23.0"
 description = "Faithful REST simulator of a 2-site Cisco ACI fabric (per-site APIC + ND/NDO)"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"

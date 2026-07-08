@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.23.0] - 2026-07-09
+
+### Added
+- **Server-side value validation (F10)**: the sim now rejects out-of-range /
+  malformed scalar MO property values that real APIC/NDO reject server-side,
+  instead of silently storing them. New `aci_sim/rest_aci/validators.py` holds a
+  table-driven `RULES: {(class, prop) -> validator}` registry (range / enum /
+  IP·MAC-format / vlan-encap checks); `writes.py::_validate_planned` (APIC) and
+  `ndo/patch.py::apply_json_patch` (NDO) enforce it before any store mutation.
+  **Fail-safe default-allow**: only registered `(class, prop)` pairs are checked,
+  so unknown properties pass untouched (no false-rejects). Bad values now return
+  `APIC Error 103: Malformed MO body: Invalid value ...` (real-APIC-style) —
+  e.g. VLAN encap outside [1,4094], VXLAN outside [1,16777215], invalid
+  IPv4/IPv6 address, ASN out of range, malformed MAC, out-of-range MTU/port.
+  Constraints sourced from the vendored cisco.aci module arg-specs and standard
+  ACI ranges, cross-checked against the real-machine var corpus for zero
+  false-rejects. ~45 rules across ~18 MO classes; +176 tests. Closes the F10
+  fidelity gap (previously a var with `vlan-9999` / `999.888.777.x` pushed
+  rc=0 and was stored; now 400 + not stored).
+
+### Notes
+- Referential integrity (service-graph device / BD-VRF must-exist) is
+  deliberately NOT included here — tracked separately (F11), as it needs a
+  real-APIC fidelity study to avoid over-rejecting the dangling refs that real
+  APIC tolerates.
+
 ## [0.22.0] - 2026-07-08
 
 ### Added

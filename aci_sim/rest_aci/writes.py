@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import re
 
 from aci_sim.build.fabric import loopback_ip, oob_ip
@@ -11,6 +10,7 @@ from aci_sim.build.neighbors import add_switch_adjacency
 from aci_sim.mit.dn import pod_from_dn
 from aci_sim.mit.mo import MO
 from aci_sim.mit.store import MITStore
+from aci_sim.rest_aci.validators import RULES
 from aci_sim.topology.schema import Node
 
 # Class -> RN template for children POSTed without an explicit ``dn``.
@@ -215,36 +215,33 @@ def _validate_node(cls: str, body: dict, path: str) -> None:
 
 
 def _validate_planned(planned: list[tuple[str, dict]]) -> None:
-    """Reject malformed property values a real APIC would 400 on (error-801
-    style) — e.g. ``fvSubnet ip=".1/24"`` or ``vnsRedirectDest ip="."``, the
-    exact garbage an unguarded J2 template renders when its input vars are
-    missing. The sim's contract is to FAIL the way real gear fails, not to
-    absorb it into the MIT. Only values actually PRESENT on a non-delete
-    write are validated (a delete needs nothing but the DN — that stays the
-    cleanup path for anything malformed that predates this check)."""
+    """Reject malformed/out-of-range property values a real APIC would 400 on
+    (error-107/801 style) — e.g. ``fvSubnet ip=".1/24"``,
+    ``l3extRsPathL3OutAtt encap="vlan-9999"``, ``bgpAsP asn="0"``. The sim's
+    contract is to FAIL the way real gear fails, not to absorb it into the
+    MIT. Only values actually PRESENT on a non-delete write are validated (a
+    delete needs nothing but the DN — that stays the cleanup path for
+    anything malformed that predates this check).
+
+    Table-driven (F10): every ``(class, prop)`` pair checked here comes from
+    ``aci_sim.rest_aci.validators.RULES`` — see that module + design doc
+    ``_F10_VALIDATION_DESIGN.md`` §3.2/§3.6 for the registry and its
+    fail-safe default-allow policy. A ``(class, prop)`` pair with NO entry in
+    RULES is intentionally NOT validated (unknown ⇒ allow, never reject)."""
     for mo_cls, mo_attrs in planned:
         if mo_attrs.get("status") == "deleted":
             continue
-        if mo_cls in ("fvSubnet", "l3extSubnet"):
-            ip = mo_attrs.get("ip")
-            if ip is not None:
-                try:
-                    ipaddress.ip_interface(ip)
-                except ValueError:
-                    raise WriteValidationError(
-                        f"Invalid value {ip!r} for property 'ip' of {mo_cls} "
-                        f"{mo_attrs.get('dn', '')!r}: not a valid address[/prefix]"
-                    ) from None
-        elif mo_cls == "vnsRedirectDest":
-            ip = mo_attrs.get("ip")
-            if ip is not None:
-                try:
-                    ipaddress.ip_address(ip)
-                except ValueError:
-                    raise WriteValidationError(
-                        f"Invalid value {ip!r} for property 'ip' of vnsRedirectDest "
-                        f"{mo_attrs.get('dn', '')!r}: not a valid IP address"
-                    ) from None
+        for prop, value in mo_attrs.items():
+            validator = RULES.get((mo_cls, prop))
+            if validator is None or value is None:
+                continue  # fail-safe: unregistered (class, prop) or unset value ⇒ allow
+            try:
+                validator(mo_cls, prop, value, mo_attrs)
+            except ValueError as reason:
+                raise WriteValidationError(
+                    f"Invalid value {value!r} for property {prop!r} of {mo_cls} "
+                    f"{mo_attrs.get('dn', '')!r}: {reason}"
+                ) from None
 
 
 def _plan_recursive(cls: str, attrs: dict, children: list, planned: list[tuple[str, dict]]) -> None:
