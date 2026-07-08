@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.22.0] - 2026-07-08
+
+### Added
+- **NDO DELETE endpoints — schemas and tenants (F5)**:
+  `DELETE /mso/api/v1/schemas/{id}` removes a schema (detail, summary —
+  seeded or runtime-POSTed — and policy-states record; unknown id → 404)
+  and `DELETE /mso/api/v1/tenants/{id}` (+ bare `/api/v1/tenants/{id}`
+  alias, same dual-shape pair as GET /tenants) removes a tenant.
+  `cisco.mso.mso_schema` / `mso_tenant` with `state=absent` send exactly
+  these requests and previously got 405, blocking E2E baseline cleanup.
+  Real-NDO guard: a tenant still referenced by any schema template's
+  `tenantId` is refused with a 400 ("referenced by schema(s) …") until
+  the referencing schemas are deleted. Schema deletion deliberately does
+  NOT cascade into the APIC deploy mirror — real NDO does not undeploy on
+  schema delete, so already-deployed objects stay orphaned on the sites'
+  APICs unless the caller undeploys first (`POST /mso/api/v1/task` with
+  `undeploy`).
+
 ## [0.21.0] - 2026-07-07
 
 ### Added

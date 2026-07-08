@@ -163,6 +163,43 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
         state.tenants.append(tenant)
         return tenant
 
+    # F5: `cisco.mso.mso_tenant` (state=absent) tears a tenant down with
+    # `DELETE tenants/{id}` — previously unrouted here (observed 405),
+    # which blocked E2E baseline cleanup. Real NDO refuses to delete a
+    # tenant while any schema template still references it (tenants must
+    # be dissociated/schema-free first), so mirror that guard: any
+    # schema_details template whose `tenantId` matches → 400. Registered
+    # on both the /mso-prefixed and bare paths, following the
+    # GET /mso/api/v1/tenants ↔ GET /api/v1/tenants dual-shape pair above
+    # (`delegate_to: localhost` cisco.mso tasks skip the /mso prefix —
+    # see the PR-13 templates-store comment below).
+    @app.delete("/mso/api/v1/tenants/{tenant_id}")
+    @app.delete("/api/v1/tenants/{tenant_id}")
+    async def delete_tenant(tenant_id: str):
+        tenant = _find_tenant(tenant_id)
+        if tenant is None:
+            raise HTTPException(
+                status_code=404, detail=f"Tenant '{tenant_id}' not found"
+            )
+        referencing = sorted(
+            {
+                detail.get("displayName") or detail.get("name") or detail["id"]
+                for detail in state.schema_details.values()
+                for tmpl in detail.get("templates", []) or []
+                if isinstance(tmpl, dict) and tmpl.get("tenantId") == tenant_id
+            }
+        )
+        if referencing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Tenant '{tenant_id}' is referenced by schema(s): "
+                    f"{', '.join(referencing)} — delete those schemas first"
+                ),
+            )
+        state.tenants.remove(tenant)
+        return {}
+
     # PR-11: `cisco.mso.ndo_template`'s prereq lookup for TenantPol templates
     # (`prereq_tenantpol.yml`'s `ndo_template` task) resolves sites through
     # this BARE path too — confirmed against a real hardware run that hit
@@ -753,6 +790,34 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
         state.policy_states.setdefault(schema_id, [{"status": "synced", "drift": False}])
 
         return detail
+
+    # F5: `cisco.mso.mso_schema` (state=absent) deletes a whole schema via
+    # `DELETE schemas/{id}` — previously unrouted (observed 405). Removes
+    # the full detail, its summary entry (whichever list holds it — seeded
+    # `state.schemas` or runtime `state.extra_schemas`) and its
+    # policy-states record, so GET /schemas, /schemas/list-identity and
+    # GET /schemas/{id} all stop reflecting it immediately. /mso prefix
+    # only — the schema CRUD surface (GET/POST/PATCH above) has no bare
+    # /api/v1 alias convention, unlike tenants/sites/templates.
+    #
+    # Deliberately NO cascade into the APIC deploy mirror: real NDO does
+    # not undeploy when a schema is deleted — objects already deployed to
+    # the sites' APICs are left orphaned there. Callers that want a clean
+    # teardown must undeploy first (`POST /mso/api/v1/task` with
+    # `undeploy: [siteId, ...]`), exactly as on real gear.
+    @app.delete("/mso/api/v1/schemas/{schema_id}")
+    async def delete_schema(schema_id: str):
+        if schema_id not in state.schema_details:
+            raise HTTPException(
+                status_code=404, detail=f"Schema '{schema_id}' not found"
+            )
+        del state.schema_details[schema_id]
+        state.schemas[:] = [s for s in state.schemas if s["id"] != schema_id]
+        state.extra_schemas[:] = [
+            s for s in state.extra_schemas if s["id"] != schema_id
+        ]
+        state.policy_states.pop(schema_id, None)
+        return {}
 
     # ------------------------------------------------------------------
     # State persistence (/_sim) — mirrors the APIC plane's admin router
