@@ -7,6 +7,7 @@ never validated on subsequent requests (accept present-or-absent).
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import uuid
 from typing import Any
@@ -18,6 +19,12 @@ from aci_sim.control.persist import apply_ndo, load_json, save_json, serialize_n
 from .deploy_mirror import mirror_template_to_sites
 from .model import NdoState
 from .patch import PatchError, apply_json_patch, normalize_site, normalize_template
+from .service_graph_validation import (
+    ServiceGraphValidationError,
+    _validate_service_graph_device_refs,
+    _validate_uniform_site_redirect,
+    service_graph_relevant,
+)
 
 
 def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> FastAPI:
@@ -748,9 +755,37 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
             # PATCH client-side and never sends it, but stay tolerant.
             return detail
 
+        # F4 + F12 (design doc `_F4_F12_VALIDATION_DESIGN.md`): only PATCHes
+        # that actually touch service-graph surface (a site-local
+        # `serviceGraphs` add/replace, or a site-local contract's
+        # `serviceGraphRelationship`) take the gated copy-validate-commit
+        # path below. Every other PATCH (the ~95% that are BD/EPG/subnet/
+        # contract-filter) stays on the original in-place fast path,
+        # byte-identical to before this change.
         try:
-            apply_json_patch(detail, ops)
-        except PatchError as exc:
+            if not service_graph_relevant(ops):
+                apply_json_patch(detail, ops)
+            else:
+                # F4 is a pure reference check — device existence doesn't
+                # depend on the mutation — so it pre-scans `ops` against the
+                # CURRENT (pre-mutation) `detail` before anything is applied.
+                # Raising here is naturally all-or-nothing (design §2.2).
+                _validate_service_graph_device_refs(ops, apic_states, state, detail)
+
+                # F12 is a post-request-final-state check (design §3.1): it
+                # cannot be evaluated per-op without false-rejecting the
+                # legal atomic multi-fabric PATCH mid-batch. Apply the ops to
+                # a deepcopy, validate the RESULT, and only commit the copy
+                # back into state.schema_details on success — a 400 here
+                # leaves the live stored schema completely untouched (and,
+                # incidentally, fixes the pre-existing partial-write-on-
+                # PatchError bug for service-graph PATCHes — design §3.2).
+                working = copy.deepcopy(detail)
+                apply_json_patch(working, ops)
+                _validate_uniform_site_redirect(working, ops)
+                state.schema_details[schema_id] = working
+                detail = working
+        except (PatchError, ServiceGraphValidationError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         detail["id"] = schema_id  # ops must never be able to clobber the id

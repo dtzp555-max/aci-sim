@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.24.0] - 2026-07-10
+
+### Added
+- **NDO service-graph server-side enforcement (F4 + F12)** — the sim's NDO now
+  faithfully rejects, at `PATCH /mso/api/v1/schemas/{id}` time, the two
+  documented real-NDO 4.x validation walls that drove the two-phase deploy
+  workflow (new `aci_sim/ndo/service_graph_validation.py`):
+  - **F4 — device-existence (NDO<->APIC ordering)**: binding a site-local
+    service graph whose `serviceNodes[].device.dn` (`uni/tn-<t>/lDevVip-<d>`)
+    does not exist on the target site's APIC returns
+    `400 "Service graph device <dev> does not exist in tenant <t> in Fabric
+    <site>"` — matching real NDO. Legal two-phase flows (phase1 creates the
+    APIC device, phase2 binds) are unaffected; a phase2-only push is now
+    rejected instead of silently binding a dangling graph.
+  - **F12 — uniform site redirect**: per-fabric `serviceGraphRelationship`
+    redirect writes are validated against the POST-request state (deepcopy ->
+    apply -> validate -> commit): partial coverage (some but not all of a
+    template's fabrics configured) returns
+    `400 "must have uniform redirect policy configured on all fabrics"`,
+    while a single atomic all-fabric PATCH passes — matching real NDO's
+    post-state validation. Coverage-based (not DN-equality; redirect DNs are
+    legitimately per-fabric). Uniformity is scoped per (template, contract),
+    so same-named contracts in sibling templates cannot cross-reject.
+  Non-service-graph PATCHes keep the original in-place fast path unchanged.
+  Fail-safe default-allow throughout; all-or-nothing (rejected writes leave
+  zero residue). +33 tests.
+
 ## [0.23.0] - 2026-07-09
 
 ### Added
