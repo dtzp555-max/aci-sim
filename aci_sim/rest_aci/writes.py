@@ -263,7 +263,7 @@ def _plan_recursive(cls: str, attrs: dict, children: list, planned: list[tuple[s
             _plan_recursive(child_cls, child_attrs, child_children, planned)
 
 
-def _upsert_recursive(store: MITStore, cls: str, attrs: dict, children: list) -> list[tuple[str, dict]]:
+def _upsert_recursive(store: MITStore, cls: str, attrs: dict, children: list) -> list[tuple[str, dict, str]]:
     """Validate the entire body shape, then upsert the MO and its children.
 
     Real APIC POST is all-or-nothing: a malformed descendant must not leave
@@ -272,9 +272,31 @@ def _upsert_recursive(store: MITStore, cls: str, attrs: dict, children: list) ->
     on any shape violation), builds the full ordered list of MOs to write,
     and only then mutates the store.
 
-    Returns the full ordered ``(class, attrs)`` plan so callers (``apply``)
-    can inspect it for reactions (e.g. a nested ``fabricNodeIdentP`` child)
-    without re-walking the body themselves.
+    Returns the full ordered ``(class, attrs, status)`` plan so callers
+    (``apply``) can inspect it for reactions (e.g. a nested
+    ``fabricNodeIdentP`` child) and for changed-MO response assembly
+    (F8a), without re-walking the body themselves. ``attrs`` is always the
+    RAW posted attrs (never the defaults-merged copy — see below), matching
+    the pre-F8a contract that reaction code already relies on.
+
+    ``status`` (F8a) is one of "created" / "modified" / "deleted" /
+    "unchanged", computed per-MO against the pre-existing stored MO:
+
+      - a posted status="deleted" -> "deleted";
+      - dn not yet in the store -> "created";
+      - else diff ONLY the user-posted keys (excluding "dn" — identity,
+        always equal by construction — and "status" — a control attr, not
+        real config) against the stored MO's attrs; any difference ->
+        "modified", else "unchanged".
+
+    The diff MUST run on the raw posted ``mo_attrs`` from *before* any
+    ``_CLASS_DEFAULTS`` overlay: the store accumulates create-time defaults
+    (e.g. fvBD's mac/mtu/...) that were never part of what the caller
+    posted, so diffing against the full stored attr set would spuriously
+    report "modified" on a byte-identical re-push of a class with defaults.
+    Because the sim stores values verbatim (no normalization), a
+    byte-identical re-push always yields stored == posted for every posted
+    key -> "unchanged".
     """
     # Re-wrap the already-parsed root attrs/children into the same node shape
     # _validate_node expects, so root and descendants share one validation
@@ -288,19 +310,42 @@ def _upsert_recursive(store: MITStore, cls: str, attrs: dict, children: list) ->
 
     # Validation passed for the entire subtree — now, and only now, mutate
     # the store (400 on validation failure => zero side effects).
+    results: list[tuple[str, dict, str]] = []
     for mo_cls, mo_attrs in planned:
+        dn = mo_attrs.get("dn")
+        # F8a: look up the pre-existing MO once, BEFORE any mutation, and
+        # use it both for the defaults-overlay decision (pre-existing
+        # behavior, unchanged) and for the changed-status diff (new). The
+        # diff uses ONLY the raw posted mo_attrs, computed here before the
+        # defaults overlay is applied to the local write-time copy below.
+        existing = store.get(dn)
+        if mo_attrs.get("status") == "deleted":
+            # F8a: deleting an already-absent DN is a store no-op
+            # (store.upsert pops a missing DN silently), so nothing
+            # changed -> report "unchanged", matching real APIC's
+            # idempotent delete. Only a delete that actually removes an
+            # existing MO reports "deleted".
+            status = "deleted" if existing is not None else "unchanged"
+        elif existing is None:
+            status = "created"
+        else:
+            posted = {k: v for k, v in mo_attrs.items() if k not in ("dn", "status")}
+            status = "modified" if any(existing.attrs.get(k) != v for k, v in posted.items()) else "unchanged"
+
         # Real APIC commits a class's object defaults at CREATE time only —
         # a later partial-update POST never resets an already-set attribute
         # back to its default. So the overlay applies iff (a) this isn't a
         # delete (no defaults that could resurrect a deleted object's attrs)
         # and (b) the DN doesn't exist yet in the store. Posted attrs are
         # layered on top of the defaults dict, so they always win.
-        dn = mo_attrs.get("dn")
-        if mo_attrs.get("status") != "deleted" and store.get(dn) is None:
-            mo_attrs = {**_CLASS_DEFAULTS.get(mo_cls, {}), **mo_attrs}
-        store.upsert(MO(mo_cls, **mo_attrs))
+        write_attrs = mo_attrs
+        if mo_attrs.get("status") != "deleted" and existing is None:
+            write_attrs = {**_CLASS_DEFAULTS.get(mo_cls, {}), **mo_attrs}
+        store.upsert(MO(mo_cls, **write_attrs))
 
-    return planned
+        results.append((mo_cls, mo_attrs, status))
+
+    return results
 
 
 def materialize_node_registration(
@@ -548,7 +593,9 @@ def _materialize_l3out_bgp_session(
     store.upsert(inst_mo)
 
 
-def apply(store: MITStore, dn: str, body: dict, *, topo=None, site=None) -> tuple[list[dict], int]:
+def apply(
+    store: MITStore, dn: str, body: dict, *, topo=None, site=None, rsp_subtree: str | None = None
+) -> tuple[list[dict], int]:
     """Apply a write (upsert or delete) from a POST /api/mo/{dn}.json body.
 
     Body shape: {"<cls>": {"attributes": {...}, "children": [...]}}
@@ -557,6 +604,18 @@ def apply(store: MITStore, dn: str, body: dict, *, topo=None, site=None) -> tupl
     *topo*/*site* are optional context needed by the fabricNodeIdentP
     reaction (pod number, spine list for cabling) — passed through by the
     caller the same way it already threads ``state.store`` here.
+
+    *rsp_subtree* (F8a) is the raw ``?rsp-subtree=`` query value (or
+    ``None`` if absent). ``cisco.aci.aci_rest`` sends
+    ``?rsp-subtree=modified`` on every non-GET by default; its ``changed()``
+    check is a recursive scan for any ``status`` in
+    {created,modified,deleted} anywhere in ``imdata`` — so real idempotency
+    requires the response to be genuinely empty when nothing changed.
+    {"modified", None, "full"} all map to "return the changed-MO list, []
+    if none changed"; "no" maps to "return []" unconditionally (matching
+    real APIC's contract of echoing nothing under rsp-subtree=no). The
+    status computation itself always runs, independent of this param — the
+    param only gates what's included in the response.
     """
     if not body:
         return [], 0
@@ -571,13 +630,14 @@ def apply(store: MITStore, dn: str, body: dict, *, topo=None, site=None) -> tupl
     effective_dn = attrs.get("dn") or dn
     attrs["dn"] = effective_dn
 
-    # Perform the upsert/delete; get back the full ordered (class, attrs)
-    # plan so the fabricNodeIdentP reaction fires for a nested child too,
-    # not just when it's the top-level POSTed class (finding #19).
-    planned = _upsert_recursive(store, cls, attrs, children)
+    # Perform the upsert/delete; get back the full ordered (class, attrs,
+    # status) plan so the fabricNodeIdentP reaction fires for a nested
+    # child too, not just when it's the top-level POSTed class (finding
+    # #19), and so the changed-MO response (F8a) can be assembled below.
+    results = _upsert_recursive(store, cls, attrs, children)
 
     if site is not None:
-        for mo_cls, mo_attrs in planned:
+        for mo_cls, mo_attrs, _status in results:
             if mo_cls != "fabricNodeIdentP":
                 continue
             if mo_attrs.get("status") == "deleted":
@@ -598,9 +658,9 @@ def apply(store: MITStore, dn: str, body: dict, *, topo=None, site=None) -> tupl
     # table (routers/topology.py) finds it — see _materialize_l3out_bgp_session
     # docstring. bgpAsP (the peer ASN) is POSTed as bgpPeerP's own nested
     # child in the SAME body (cisco.aci's tenant.yml task), so it is already
-    # in this same `planned` list — read it from there instead of a second
+    # in this same `results` list — read it from there instead of a second
     # store lookup.
-    for mo_cls, mo_attrs in planned:
+    for mo_cls, mo_attrs, _status in results:
         if mo_cls != "bgpPeerP":
             continue
         if mo_attrs.get("status") == "deleted":
@@ -610,12 +670,22 @@ def apply(store: MITStore, dn: str, body: dict, *, topo=None, site=None) -> tupl
         if not peer_dn or not addr:
             continue
         remote_asn = ""
-        for as_cls, as_attrs in planned:
+        for as_cls, as_attrs, _as_status in results:
             if as_cls == "bgpAsP" and as_attrs.get("dn", "").startswith(f"{peer_dn}/"):
                 remote_asn = as_attrs.get("asn", "")
                 break
         _materialize_l3out_bgp_session(store, peer_dn, addr, remote_asn)
 
-    status = "deleted" if attrs.get("status") == "deleted" else "created"
-    result = [{cls: {"attributes": {"dn": effective_dn, "status": status}}}]
-    return result, 1
+    # F8a: build imdata from only the MOs that actually changed. Reactions
+    # (fabricNodeIdentP node materialization, bgpPeerP session
+    # materialization) upsert sim-internal MOs that were never part of
+    # `results` — correctly excluded here, same as before F8a.
+    if rsp_subtree == "no":
+        return [], 0
+
+    imdata = [
+        {mo_cls: {"attributes": {"dn": mo_attrs["dn"], "status": st}}}
+        for mo_cls, mo_attrs, st in results
+        if st in ("created", "modified", "deleted")
+    ]
+    return imdata, len(imdata)

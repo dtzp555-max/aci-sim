@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.25.0] - 2026-07-10
+
+### Changed
+- **APIC write-face changed-status fidelity (F8a)** — a POST now reports the
+  real per-MO status (`created` / `modified` / *unchanged*) instead of
+  unconditionally stamping `created`. `aci_sim/rest_aci/writes.py` diffs each
+  planned MO's **raw posted attributes** (excluding `dn`/`status`, before the
+  create-time `_CLASS_DEFAULTS` overlay) against the pre-existing stored MO at
+  the write choke point, and `apply()` builds `imdata` from **only the changed
+  MOs** — returning empty `imdata` (+ `totalCount "0"`) when nothing changed.
+  `post_mo` reads `?rsp-subtree` and threads it through (`modified`/absent/`full`
+  → changed-MO list; `no` → empty). This restores real-APIC idempotency for
+  every raw `aci_rest`-driven write: an unchanged re-push now yields
+  `changed=false` (previously `changed=true` forever), fixing pass2 idempotency
+  across the L3Out topology (`l3extLNodeP`/`l3extLIfP`/`l3extRsNodeL3OutAtt`/
+  `l3extRsPathL3OutAtt`/`bgpPeerP`/`bfdIfP`), static-path, and PBR-redirect
+  blocks. Higher-level cisco.aci modules were already idempotent (client-side
+  get-diff) and are unaffected; the flat changed-MO response is `changed()`-scan
+  faithful (real APIC's nested `rsp-subtree` wire shape is a documented deferred
+  enhancement — no real-gear capture available to reproduce it accurately).
+- **Idempotent delete-of-missing (F1)** — POSTing `status:"deleted"` to an
+  already-absent DN now reports *unchanged* (empty `imdata`) instead of
+  `deleted`, matching real APIC: `store.upsert` pops a missing DN as a silent
+  no-op, so nothing changed. A delete that actually removes an existing MO still
+  reports `deleted`.
+  +12 tests (re-push idempotency, defaults-overlay guard, partial re-push,
+  parent-unchanged/child-changed, status-pollution re-push, delete-of-missing,
+  `rsp-subtree=no`).
+
 ## [0.24.0] - 2026-07-10
 
 ### Added

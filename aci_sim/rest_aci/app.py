@@ -201,8 +201,17 @@ def make_apic_app(state: ApicSiteState) -> FastAPI:
         # below is unchanged from before this feature.
         effective_dn = (body[cls].get("attributes") or {}).get("dn") or dn
         pre_existing = state.store.get(effective_dn) is not None
+        # F8a: cisco.aci.aci_rest appends ?rsp-subtree=modified to every
+        # non-GET by default (rsp_subtree_preserve=false); thread the raw
+        # value through so write_apply can decide what to include in the
+        # response ({modified,absent,full} -> changed-MO list, "no" -> []).
+        # The changed-status computation itself is unconditional — this
+        # param only gates response inclusion, never the diff.
+        rsp_subtree = request.query_params.get("rsp-subtree")
         try:
-            imdata, total = write_apply(state.store, dn, body, topo=state.topo, site=state.site)
+            imdata, total = write_apply(
+                state.store, dn, body, topo=state.topo, site=state.site, rsp_subtree=rsp_subtree
+            )
         except (WriteValidationError, AttributeError, TypeError, KeyError) as exc:
             return _apic_error(f"Malformed MO body: {exc}", code="103", status_code=400)
         # Push-on-change (subscriptions): notify after the store commit above.
