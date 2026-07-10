@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.26.0] - 2026-07-11
+
+### Fixed
+- **NDO tenant-delete guard now covers tenant policy templates (F5b)** — the
+  in-use guard added in 0.22.0 only scanned SCHEMA templates' `tenantId`, so a
+  tenant referenced only by a tenant policy template
+  (`tenant_policy_templates[*].tenantPolicyTemplate.template.tenantId`) could
+  be deleted, leaving a dangling reference (fails-open). `DELETE
+  /mso/api/v1/tenants/{id}` now scans both: a tenant referenced by a policy
+  template returns `400 "Tenant '<id>' is referenced by tenant policy
+  template(s): <names> — delete those templates first"` (wording is a
+  format-mirrored approximation of the hardware-grounded schema-template
+  message — no real-NDO capture of this specific rejection text exists yet,
+  and the code comment says so). The schema-template message is byte-for-byte
+  unchanged; deleting the referencing template still releases the guard;
+  malformed policy-template entries default-allow (fail-safe). +4 tests.
+
 ## [0.25.0] - 2026-07-10
 
 ### Changed

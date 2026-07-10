@@ -180,6 +180,21 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
     # GET /mso/api/v1/tenants ↔ GET /api/v1/tenants dual-shape pair above
     # (`delegate_to: localhost` cisco.mso tasks skip the /mso prefix —
     # see the PR-13 templates-store comment below).
+    #
+    # F5b: the F5 guard above only ever scanned SCHEMA templates — a
+    # tenant referenced ONLY by a tenant policy template
+    # (`tenant_policy_templates[*].tenantPolicyTemplate.template.
+    # tenantId` — same field path `_get_template_objects`/
+    # `_backfill_policy_uuids` already traverse above) deleted cleanly,
+    # fails-open vs. real NDO which refuses regardless of which template
+    # type holds the reference. Extend the scan to cover both. The
+    # policy-template branch's exact wording is an approximation mirrored
+    # from the F5 schema-template message's format/shape — no real-NDO
+    # hardware capture of THIS specific rejection text exists yet, unlike
+    # the schema-template wording above (see F5's commit evidence). A
+    # malformed policy-template entry (non-dict `tenantPolicyTemplate`/
+    # `template`) default-allows rather than crashing the guard, matching
+    # this sim's fail-safe philosophy elsewhere.
     @app.delete("/mso/api/v1/tenants/{tenant_id}")
     @app.delete("/api/v1/tenants/{tenant_id}")
     async def delete_tenant(tenant_id: str):
@@ -188,7 +203,7 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
             raise HTTPException(
                 status_code=404, detail=f"Tenant '{tenant_id}' not found"
             )
-        referencing = sorted(
+        referencing_schemas = sorted(
             {
                 detail.get("displayName") or detail.get("name") or detail["id"]
                 for detail in state.schema_details.values()
@@ -196,14 +211,40 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
                 if isinstance(tmpl, dict) and tmpl.get("tenantId") == tenant_id
             }
         )
-        if referencing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Tenant '{tenant_id}' is referenced by schema(s): "
-                    f"{', '.join(referencing)} — delete those schemas first"
-                ),
+        referencing_policy_templates = sorted(
+            {
+                doc.get("displayName") or key
+                for key, doc in state.tenant_policy_templates.items()
+                if isinstance(doc, dict)
+                and isinstance(doc.get("tenantPolicyTemplate"), dict)
+                and isinstance(
+                    doc["tenantPolicyTemplate"].get("template"), dict
+                )
+                and doc["tenantPolicyTemplate"]["template"].get("tenantId")
+                == tenant_id
+            }
+        )
+        if referencing_schemas and referencing_policy_templates:
+            detail_msg = (
+                f"Tenant '{tenant_id}' is referenced by schema(s): "
+                f"{', '.join(referencing_schemas)} — delete those schemas "
+                f"first; and tenant policy template(s): "
+                f"{', '.join(referencing_policy_templates)} — delete those "
+                f"templates first"
             )
+        elif referencing_schemas:
+            detail_msg = (
+                f"Tenant '{tenant_id}' is referenced by schema(s): "
+                f"{', '.join(referencing_schemas)} — delete those schemas first"
+            )
+        elif referencing_policy_templates:
+            detail_msg = (
+                f"Tenant '{tenant_id}' is referenced by tenant policy "
+                f"template(s): {', '.join(referencing_policy_templates)} — "
+                f"delete those templates first"
+            )
+        if referencing_schemas or referencing_policy_templates:
+            raise HTTPException(status_code=400, detail=detail_msg)
         state.tenants.remove(tenant)
         return {}
 
