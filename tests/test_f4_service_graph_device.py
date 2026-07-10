@@ -1,8 +1,9 @@
 """F4 — NDO service-graph device-existence gate.
 
-Design: `_F4_F12_VALIDATION_DESIGN.md` §2 (repo root). Confirmed sim gap: a
-phase2-only service-graph bind (skip phase1's APIC-side `vnsLDevVip`
-create) used to succeed in the sim while real NDO 400s with
+See aci_sim/ndo/service_graph_validation.py's docstring for the full F4
+rule. Confirmed sim gap: a phase2-only service-graph bind (skip phase1's
+APIC-side `vnsLDevVip` create) used to succeed in the sim while real NDO
+400s with
 `Service graph device <dev> does not exist in tenant <tenant> in Fabric
 <site>`.
 

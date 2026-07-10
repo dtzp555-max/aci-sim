@@ -6,10 +6,10 @@ validation. A real APIC 400-rejects out-of-range/malformed values (e.g.
 ``l3extRsPathL3OutAtt encap=vlan-9999``, ``l3extRsNodeL3OutAtt
 rtrId=999.888.777.241``) even when the posting client (``cisco.aci.aci_rest``
 raw MO bodies, in this campaign) does zero client-side validation of its own.
-This module is the table-driven rule catalog that closes that gap — see
-``_F10_VALIDATION_DESIGN.md`` (design doc, authoritative) for the full rule
-table, sourcing, and false-reject risk analysis. Do not add rules here that
-aren't in that table without updating the design doc first.
+This module is the table-driven rule catalog that closes that gap — see the
+RULES table below and its section comments for the full rule set, sourcing,
+and false-reject-risk analysis. Do not add rules here without a comment
+documenting that row's sourcing.
 
 Architecture (design §3.1):
   - Small composable validator *factories* (``rng``, ``one_of``, ``fmt``,
@@ -117,8 +117,9 @@ _MAC_COLON_RE = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
 _MAC_DOT_RE = re.compile(r"^[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}$")
 
 #: Named L4 ports real APIC/`cisco.aci` accept in place of a numeric port,
-#: sourced verbatim from `aci-ansible-dev`'s `FILTER_PORT_MAPPING`
-#: (module_utils/constants.py) values, plus the literal "unspecified".
+#: sourced verbatim from the vendored cisco.aci collection's
+#: `FILTER_PORT_MAPPING` (module_utils/constants.py) values, plus the
+#: literal "unspecified".
 _NAMED_PORTS = {"https", "smtp", "http", "dns", "pop3", "rtsp", "ftpData", "unspecified"}
 
 
@@ -273,11 +274,12 @@ def all_of(*validators: Validator) -> Validator:
 # ---------------------------------------------------------------------------
 # RULES — (class, prop) -> Validator
 #
-# Every entry below is sourced from a row in _F10_VALIDATION_DESIGN.md §2A
+# Every entry below falls into one of two source categories: §2A
 # (Priority 1 — server-only format/range) or §2B (Priority 2 — server-only
-# enums). Comments cite the design-doc row. Cross-field / cardinality rules
-# (§2C, e.g. infraPortBlk fromPort<=toPort, fvnsEncapBlk from<=to) are OUT OF
-# SCOPE for this batch (P1+P2 only) — deliberately not implemented here.
+# enums), per the rule-source notes in this module's docstring. Cross-field /
+# cardinality rules (§2C, e.g. infraPortBlk fromPort<=toPort, fvnsEncapBlk
+# from<=to) are OUT OF SCOPE for this batch (P1+P2 only) — deliberately not
+# implemented here.
 # ---------------------------------------------------------------------------
 
 RULES: dict[tuple[str, str], Validator] = {

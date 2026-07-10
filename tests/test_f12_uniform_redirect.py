@@ -1,11 +1,11 @@
 """F12 — NDO uniform per-fabric service-graph redirect gate.
 
-Design: `_F4_F12_VALIDATION_DESIGN.md` §3 (repo root). Confirmed sim gap: a
-single-fabric (partial) `serviceGraphRelationship` redirect write used to
-succeed in the sim while real NDO 400s with `must have uniform redirect
-policy configured on all fabrics` — NDO validates the FINAL POST-REQUEST
-state, so a legal atomic multi-op PATCH covering every fabric of a
-template in ONE request must still pass.
+See aci_sim/ndo/service_graph_validation.py's docstring for the full F12
+rule. Confirmed sim gap: a single-fabric (partial) `serviceGraphRelationship`
+redirect write used to succeed in the sim while real NDO 400s with `must
+have uniform redirect policy configured on all fabrics` — NDO validates the
+FINAL POST-REQUEST state, so a legal atomic multi-op PATCH covering every
+fabric of a template in ONE request must still pass.
 
 Replicates the mso-model role's "Atomic PATCH — bind service-graph redirect
 on ALL fabrics in one request" task (design §1.4) — the exact shape

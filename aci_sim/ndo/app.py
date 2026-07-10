@@ -755,7 +755,7 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
             # PATCH client-side and never sends it, but stay tolerant.
             return detail
 
-        # F4 + F12 (design doc `_F4_F12_VALIDATION_DESIGN.md`): only PATCHes
+        # F4 + F12 (see aci_sim/ndo/service_graph_validation.py docstring): only PATCHes
         # that actually touch service-graph surface (a site-local
         # `serviceGraphs` add/replace, or a site-local contract's
         # `serviceGraphRelationship`) take the gated copy-validate-commit

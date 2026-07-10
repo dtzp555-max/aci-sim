@@ -224,10 +224,10 @@ def _validate_planned(planned: list[tuple[str, dict]]) -> None:
     anything malformed that predates this check).
 
     Table-driven (F10): every ``(class, prop)`` pair checked here comes from
-    ``aci_sim.rest_aci.validators.RULES`` — see that module + design doc
-    ``_F10_VALIDATION_DESIGN.md`` §3.2/§3.6 for the registry and its
-    fail-safe default-allow policy. A ``(class, prop)`` pair with NO entry in
-    RULES is intentionally NOT validated (unknown ⇒ allow, never reject)."""
+    ``aci_sim.rest_aci.validators.RULES`` — see that module's docstring and
+    section comments for the registry and its fail-safe default-allow
+    policy. A ``(class, prop)`` pair with NO entry in RULES is intentionally
+    NOT validated (unknown ⇒ allow, never reject)."""
     for mo_cls, mo_attrs in planned:
         if mo_attrs.get("status") == "deleted":
             continue

@@ -1,6 +1,6 @@
 """F4 + F12 — NDO server-side service-graph fidelity enforcements.
 
-See `_F4_F12_VALIDATION_DESIGN.md` (repo root) for the full design. Summary:
+Summary of the two enforcements:
 
 - **F4 — device-existence gate.** When a site-local service-graph binding op
   (`/sites/{siteId}-{templateName}/serviceGraphs/...`) references an L4-L7
@@ -341,6 +341,19 @@ def _validate_uniform_site_redirect(working: dict, ops: list[dict]) -> None:
     `_touched_redirect_contracts`'s docstring for the cross-template
     false-reject this scoping fixes). A template with only one associated
     fabric is trivially uniform (design §3.4 / §4).
+
+    Coverage-group bias (intentional fail-safe): the group below only
+    includes fabrics that already carry a `contracts[]` shadow entry for
+    *contract* — a fabric with NO shadow entry at all is excluded outright,
+    not counted as "not yet configured". From working state alone we can't
+    distinguish "this fabric hasn't received the contract shadow yet" from
+    "this fabric doesn't participate in this contract", so an all-but-one-
+    fabric-shadowless group collapses to `total <= 1` and passes rather than
+    risk a false 400. Live-gate testing (real NDO + cisco.mso, once
+    cisco.mso has built the shadow entries on every participating fabric)
+    confirms the real chain still correctly 400s a genuine partial redirect
+    write — this bias only ever widens the ambiguous states this check
+    deliberately stays silent on.
     """
     sites = working.get("sites")
     if not isinstance(sites, list):

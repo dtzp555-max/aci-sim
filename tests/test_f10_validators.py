@@ -1,7 +1,7 @@
 """F10 — server-side value validation, unit level (aci_sim/rest_aci/validators.py).
 
-Table-driven per the design doc's own zero-false-reject proof methodology
-(``_F10_VALIDATION_DESIGN.md`` §6): every canonical value that appears in the
+Table-driven per this suite's own zero-false-reject proof methodology: every
+canonical value that appears in the
 real-hardware-passing corpus (``~/e2e-20260708/vars/{ms,sf,common}/`` +
 ``logs/ansible/*create_tenant*.yml``) MUST pass; every F10-probe bad value
 (``logs/probe/*probe_L2b.yml``) and one or two hand-built out-of-range/format
@@ -322,11 +322,10 @@ def test_unregistered_class_prop_pair_has_no_validator():
 
 def test_rules_table_size_matches_design_scope():
     """Sanity lock on the registry shape: P1+P2 (+3 migrated ip rules) should
-    land in the low-to-mid 40s of (class, prop) entries — see
-    _F10_VALIDATION_DESIGN.md §2A/§2B row counts (16+17 table ROWS; several
-    rows cover 2+ props, e.g. infraPortBlk's 4 port/card fields, so the
-    (class, prop) key count is naturally higher than the 31 "core rules"
-    row-count figure quoted in the design doc's summary)."""
+    land in the low-to-mid 40s of (class, prop) entries (16+17 source-table
+    rows; several rows cover 2+ props, e.g. infraPortBlk's 4 port/card
+    fields, so the (class, prop) key count is naturally higher than the 31
+    "core rules" row-count figure)."""
     assert 35 <= len(RULES) <= 55
 
 
