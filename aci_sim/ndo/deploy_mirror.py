@@ -184,6 +184,22 @@ def _mirror_bd(store: MITStore, tenant: str, bd: dict, site_bd: dict | None) -> 
     store.upsert(bd_mo)
 
 
+def _encap_of(path: dict) -> str:
+    """APIC-style encap string for one NDO staticPorts entry.
+
+    NDO uses `portEncapVlan` (a bare int, e.g. 110); APIC wants "vlan-110".
+    An explicit `encap` already in APIC form wins, so a hand-written or
+    directly-POSTed entry keeps working.
+    """
+    encap = path.get("encap")
+    if encap:
+        return str(encap)
+    vlan = path.get("portEncapVlan")
+    if vlan in (None, ""):
+        return ""
+    return str(vlan) if str(vlan).startswith(("vlan-", "vxlan-")) else f"vlan-{vlan}"
+
+
 def _mirror_epg(store: MITStore, tenant: str, anp_name: str, epg: dict, site_epg: dict | None) -> None:
     """Upsert fvAEPg (+ fvRsBd/fvRsProv/fvRsCons/fvSubnet/fvRsDomAtt/
     fvRsPathAtt children) for one template EPG, overlaid with the SITE epg's
@@ -250,11 +266,16 @@ def _mirror_epg(store: MITStore, tenant: str, anp_name: str, epg: dict, site_epg
             t_dn = dom.get("dn") or dom.get("domainRef") or dom.get("tDn")
             if not t_dn:
                 continue
+            # NDO carries both immediacies per association; a real APIC shows
+            # them on the fvRsDomAtt, and cisco.aci's aci_epg_to_domain reads
+            # them back. Hardcoding instrImedcy="lazy" and omitting resImedcy
+            # made every mirrored binding look unconfigured.
             epg_mo.add_child(MO(
                 "fvRsDomAtt",
                 dn=f"{epg_dn}/rsdomAtt-[{t_dn}]",
                 tDn=t_dn,
-                instrImedcy="lazy",
+                instrImedcy=dom.get("deploymentImmediacy") or "lazy",
+                resImedcy=dom.get("resolutionImmediacy") or "lazy",
             ))
         for path in site_epg.get("staticPorts", []) or []:
             if not isinstance(path, dict):
@@ -262,11 +283,15 @@ def _mirror_epg(store: MITStore, tenant: str, anp_name: str, epg: dict, site_epg
             path_dn = path.get("path") or path.get("dn") or path.get("tDn")
             if not path_dn:
                 continue
+            # NDO names the VLAN `portEncapVlan` and stores it as a bare int
+            # (110); APIC wants the encap string ("vlan-110"). Reading "encap"
+            # meant every mirrored static port landed with an empty encap —
+            # invalid on real gear, and blank in any tool that reads it back.
             epg_mo.add_child(MO(
                 "fvRsPathAtt",
                 dn=f"{epg_dn}/rspathAtt-[{path_dn}]",
                 tDn=path_dn,
-                encap=path.get("encap", ""),
+                encap=_encap_of(path),
                 mode=path.get("mode", "regular"),
                 instrImedcy=path.get("deploymentImmediacy", "lazy"),
             ))

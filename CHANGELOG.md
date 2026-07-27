@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.26.1] - 2026-07-28
+
+### Fixed
+
+- **NDO deploy mirror dropped two site-local bind attributes.** Running the
+  `bind_epg_to_static_port` / `bind_epg_to_physical_domain` playbooks against a
+  multi-site tenant left the NDO schema correct but the mirrored APIC MOs
+  incomplete:
+  - `fvRsPathAtt.encap` was always empty. NDO writes the static-port VLAN as
+    `portEncapVlan` (a bare int, `110`); the mirror only read an `encap` key, so
+    every mirrored static port landed with no encap — invalid on real gear, and
+    blank in any tool reading it back. Now converted to APIC form (`vlan-110`),
+    with an explicit APIC-form `encap` still winning so hand-written or
+    directly-POSTed entries are unaffected.
+  - `fvRsDomAtt` hardcoded `instrImedcy="lazy"` and never wrote `resImedcy` at
+    all, discarding the `deploymentImmediacy` / `resolutionImmediacy` NDO carries
+    per association. Both are now mirrored, falling back to `lazy`.
+
+  Found by pushing the full post-EPG playbook set (domain / static-port / AAEP /
+  DHCP bindings) at a two-site tenant and diffing NDO state against both APICs.
+
+### Known gap
+
+- Tenant **policy** templates are still not mirrored. `create_dhcp_relay`
+  correctly creates the NDO tenant-policy template, but no `dhcpRelayP` /
+  `dhcpLbl` appears on the APICs — same family as the un-mirrored
+  `vzBrCP`/`vzSubj` gap.
+
 ## [0.26.0] - 2026-07-11
 
 ### Fixed
