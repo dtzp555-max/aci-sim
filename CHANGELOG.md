@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Found by pushing the full post-EPG playbook set (domain / static-port / AAEP /
   DHCP bindings) at a two-site tenant and diffing NDO state against both APICs.
 
+- **Only the `mgmt` built-in tenant existed.** A real APIC boots with `common`,
+  `infra` and `mgmt`; this sim built only `mgmt` (as the parent for the OOB
+  scaffolding), so `GET /api/class/fvTenant.json` returned two fewer objects than
+  any real fabric and `uni/tn-common` — where shared contracts/filters/L3Outs are
+  conventionally defined, and which var files reference by DN — did not resolve at
+  all. New `build/builtin_tenants.py` emits `common` and `infra`; `build/mgmt.py`
+  stays the sole owner of `mgmt` and its OOB tree. Scope is deliberately minimal
+  (the tenant MOs, not the policy trees a real APIC pre-populates), matching the
+  existing mgmt builder's stance.
+
 ### Known gap
 
 - Tenant **policy** templates are still not mirrored. `create_dhcp_relay`

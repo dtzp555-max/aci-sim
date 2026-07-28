@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from aci_sim.build import (
     access,
+    builtin_tenants,
     cabling,
     endpoints,
     fabric,
@@ -59,6 +60,7 @@ from aci_sim.topology.schema import Site, Topology
 # node-identity/OOB data.
 _BUILDERS = [
     fabric,
+    builtin_tenants,
     mgmt,
     cabling,
     underlay,
@@ -68,6 +70,7 @@ _BUILDERS = [
     tenants,
     zoning,
     access,
+    builtin_tenants,
     l3out,
     routing,
     health_faults,
