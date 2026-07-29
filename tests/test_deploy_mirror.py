@@ -553,3 +553,88 @@ def test_undeploy_removes_contract_shadows() -> None:
     assert apic.store.get(f"{tn}/brc-con-Firewall_LAB0") is None
     assert apic.store.get(f"{tn}/flt-flt-permit_ip_LAB0") is None
     assert apic.store.get(f"{tn}/AbsGraph-sgt-FW_LAB0") is None
+
+
+# ---------------------------------------------------------------------------
+# NDO -> APIC bind attributes: portEncapVlan and the two immediacies
+#
+# NDO writes the static-port VLAN as `portEncapVlan`, a bare int; APIC wants the
+# encap string. Reading only "encap" left every mirrored static port with an
+# empty encap — invalid on real gear, and blank in anything that reads it back.
+# Domain associations had the same shape of loss: instrImedcy was hardcoded
+# "lazy" and resImedcy was never written at all.
+# ---------------------------------------------------------------------------
+
+
+def _mirror_one_static_port(entry):
+    state = _build_state()
+    site_epg = state.schema_details[SCHEMA_ID]["sites"][0]["anps"][0]["epgs"][0]
+    site_epg["staticPorts"] = [entry]
+    apic_states = {"1": _FakeApicState()}
+    mirror_template_to_sites(state, TEMPLATE_NAME, apic_states)
+    epg_dn = f"uni/tn-{TENANT_NAME}/ap-AP1/epg-Web"
+    return apic_states["1"].store.get(f"{epg_dn}/rspathAtt-[{entry['path']}]")
+
+
+_PATH = "topology/pod-1/protpaths-103-104/pathep-[vpcdom-LAB1-vpc]"
+
+
+def test_static_port_port_encap_vlan_int_becomes_encap_string():
+    rspath = _mirror_one_static_port(
+        {"path": _PATH, "portEncapVlan": 110, "mode": "regular",
+         "deploymentImmediacy": "immediate", "type": "vpc"}
+    )
+    assert rspath is not None
+    assert rspath.attrs["encap"] == "vlan-110"
+
+
+def test_static_port_already_prefixed_encap_is_left_alone():
+    rspath = _mirror_one_static_port({"path": _PATH, "portEncapVlan": "vlan-120"})
+    assert rspath.attrs["encap"] == "vlan-120"
+
+
+def test_static_port_explicit_encap_wins_over_port_encap_vlan():
+    # a hand-written / directly-POSTed entry keeps working
+    rspath = _mirror_one_static_port(
+        {"path": _PATH, "encap": "vlan-999", "portEncapVlan": 110}
+    )
+    assert rspath.attrs["encap"] == "vlan-999"
+
+
+def test_static_port_without_any_vlan_stays_empty():
+    rspath = _mirror_one_static_port({"path": _PATH})
+    assert rspath.attrs["encap"] == ""
+
+
+def test_domain_association_carries_both_immediacies():
+    state = _build_state()
+    site_epg = state.schema_details[SCHEMA_ID]["sites"][0]["anps"][0]["epgs"][0]
+    site_epg["domainAssociations"] = [
+        {
+            "dn": "uni/phys-phy-general",
+            "domainType": "physicalDomain",
+            "deploymentImmediacy": "immediate",
+            "resolutionImmediacy": "pre-provision",
+        }
+    ]
+    apic_states = {"1": _FakeApicState()}
+    mirror_template_to_sites(state, TEMPLATE_NAME, apic_states)
+
+    epg_dn = f"uni/tn-{TENANT_NAME}/ap-AP1/epg-Web"
+    dom = apic_states["1"].store.get(f"{epg_dn}/rsdomAtt-[uni/phys-phy-general]")
+    assert dom is not None
+    assert dom.attrs["instrImedcy"] == "immediate"
+    assert dom.attrs["resImedcy"] == "pre-provision"
+
+
+def test_domain_association_without_immediacies_falls_back_to_lazy():
+    state = _build_state()
+    site_epg = state.schema_details[SCHEMA_ID]["sites"][0]["anps"][0]["epgs"][0]
+    site_epg["domainAssociations"] = [{"dn": "uni/phys-phy-general"}]
+    apic_states = {"1": _FakeApicState()}
+    mirror_template_to_sites(state, TEMPLATE_NAME, apic_states)
+
+    epg_dn = f"uni/tn-{TENANT_NAME}/ap-AP1/epg-Web"
+    dom = apic_states["1"].store.get(f"{epg_dn}/rsdomAtt-[uni/phys-phy-general]")
+    assert dom.attrs["instrImedcy"] == "lazy"
+    assert dom.attrs["resImedcy"] == "lazy"
