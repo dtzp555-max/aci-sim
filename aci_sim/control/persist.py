@@ -84,8 +84,8 @@ def state_dir() -> Path:
 ENVELOPE_VERSION = 1
 
 
-def sim_version() -> str:
-    """This sim's version — source tree first, then installed metadata.
+def _read_version() -> str:
+    """Read the version — source tree first, then installed metadata.
 
     An editable install freezes its dist metadata at install time, so
     ``importlib.metadata`` keeps reporting whatever the version was on the day
@@ -107,6 +107,21 @@ def sim_version() -> str:
         return _pkg_version("aci-sim")
     except PackageNotFoundError:
         return "unknown"
+
+
+# Resolved once, at import — i.e. when this process loaded the code it is
+# running. Re-reading per call would mean that between a `git pull` and the
+# restart that picks it up, the sim stamps snapshots with a version it is not
+# yet: 0.28.1 builders producing MOs labelled 0.29.0, which then restore
+# cleanly onto a real 0.29.0 because the stamp agrees. The stamp has to
+# describe the running code, and the file on disk stops describing it the
+# moment someone pulls.
+_SIM_VERSION = _read_version()
+
+
+def sim_version() -> str:
+    """This sim's version, as of the moment this process started."""
+    return _SIM_VERSION
 
 
 def topology_fingerprint(path: str | os.PathLike[str] | None = None) -> str:
