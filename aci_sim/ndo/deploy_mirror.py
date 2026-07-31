@@ -174,6 +174,19 @@ def _mirror_bd(store: MITStore, tenant: str, bd: dict, site_bd: dict | None) -> 
             scope=scope,
             preferred="yes" if subnet.get("primary") else "no",
         ))
+    for label in bd.get("dhcpLabels", []) or []:
+        if not isinstance(label, dict):
+            continue
+        label_name = label.get("name") or _basename(label.get("ref"))
+        if not label_name:
+            continue
+        bd_mo.add_child(MO(
+            "dhcpLbl",
+            dn=f"{bd_dn}/dhcplbl-{label_name}",
+            name=label_name,
+            owner="tenant",
+        ))
+
     # Merge-upsert (NOT delete-then-recreate) on purpose: the BD may carry an
     # externally-POSTed `epClear` attr (the clear_remote_mac stub a playbook
     # posts directly to the APIC) that a delete-then-recreate would drop.
@@ -308,6 +321,129 @@ def _mirror_epg(store: MITStore, tenant: str, anp_name: str, epg: dict, site_epg
     store.upsert(epg_mo)
 
 
+def _find_extepg_l3out(schema_detail: dict, extepg_name: str) -> str:
+    """Which L3Out owns *extepg_name*, across every template in this schema.
+
+    A relay provider names the external EPG but not its L3Out, and the APIC dn
+    needs both (`uni/tn-T/out-L/instP-E`). External EPG names are unique within
+    a tenant in practice, so a schema-wide scan resolves it.
+    """
+    for tmpl in schema_detail.get("templates", []) or []:
+        for xepg in tmpl.get("externalEpgs", []) or []:
+            if isinstance(xepg, dict) and xepg.get("name") == extepg_name:
+                return _basename(xepg.get("l3outRef"))
+    return ""
+
+
+def _find_epg_anp(schema_detail: dict, epg_name: str) -> str:
+    """Which application profile holds *epg_name*, across this schema."""
+    for tmpl in schema_detail.get("templates", []) or []:
+        for anp in tmpl.get("anps", []) or []:
+            if not isinstance(anp, dict):
+                continue
+            for epg in anp.get("epgs", []) or []:
+                if isinstance(epg, dict) and epg.get("name") == epg_name:
+                    return anp.get("name", "")
+    return ""
+
+
+def _provider_tdn(schema_detail: dict, tenant: str, provider: dict) -> str:
+    """APIC target dn for one DHCP relay provider entry.
+
+    NDO models the two provider kinds with different keys — an application EPG
+    (`epgName`) or an L3Out external EPG (`externalEpgName`), matching the
+    DHCP1/DHCP2 split in `create_dhcp_relay.j2.yml`.
+    """
+    extepg = provider.get("externalEpgName")
+    if extepg:
+        l3out = _find_extepg_l3out(schema_detail, extepg)
+        if not l3out:
+            return ""
+        return f"uni/tn-{tenant}/out-{l3out}/instP-{extepg}"
+    epg = provider.get("epgName")
+    if epg:
+        anp = _find_epg_anp(schema_detail, epg)
+        if not anp:
+            return ""
+        return f"uni/tn-{tenant}/ap-{anp}/epg-{epg}"
+    return ""
+
+
+def _relay_policies_for_tenant(state: NdoState, tenant_id: str) -> list[dict]:
+    """Every DHCP relay policy in this tenant's tenantPolicy template(s)."""
+    policies: list[dict] = []
+    for doc in getattr(state, "tenant_policy_templates", {}).values():
+        if not isinstance(doc, dict):
+            continue
+        tmpl = doc.get("tenantPolicyTemplate", {}).get("template", {})
+        if tmpl.get("tenantId") != tenant_id:
+            continue
+        for pol in tmpl.get("dhcpRelayPolicies", []) or []:
+            if isinstance(pol, dict) and pol.get("name"):
+                policies.append(pol)
+    return policies
+
+
+def _mirror_dhcp_relay_policies(
+    store: MITStore,
+    state: NdoState,
+    schema_detail: dict,
+    tenant: str,
+    tenant_id: str,
+    template: dict,
+) -> int:
+    """Materialize the dhcpRelayP objects that this template's BD labels name.
+
+    Only the REFERENCED policies are mirrored, not the whole tenantPolicy
+    template. Nothing deployed that template, so its other policies have no
+    business on a site — but a `dhcpLbl` pointing at an absent `dhcpRelayP` is
+    a dangling reference of exactly the kind `_mirror_contracts` already exists
+    to prevent, so the ones a deployed BD names do get materialized.
+    """
+    referenced = {
+        label.get("name") or _basename(label.get("ref"))
+        for bd in template.get("bds", []) or []
+        if isinstance(bd, dict)
+        for label in bd.get("dhcpLabels", []) or []
+        if isinstance(label, dict)
+    }
+    referenced.discard("")
+    referenced.discard(None)
+    if not referenced:
+        return 0
+
+    written = 0
+    for pol in _relay_policies_for_tenant(state, tenant_id):
+        name = pol.get("name", "")
+        if name not in referenced:
+            continue
+        relay_dn = f"uni/tn-{tenant}/relayp-{name}"
+        relay = MO(
+            "dhcpRelayP",
+            dn=relay_dn,
+            name=name,
+            descr=pol.get("description", ""),
+            owner="tenant",
+            mode="visible",
+        )
+        for prov in pol.get("providers", []) or []:
+            if not isinstance(prov, dict):
+                continue
+            tdn = _provider_tdn(schema_detail, tenant, prov)
+            addr = prov.get("ip", "")
+            if not tdn or not addr:
+                continue
+            relay.add_child(MO(
+                "dhcpRsProv",
+                dn=f"{relay_dn}/rsprov-[{tdn}]",
+                tDn=tdn,
+                addr=addr,
+            ))
+        store.upsert(relay)
+        written += 1
+    return written
+
+
 def _template_object_dns(tenant: str, template: dict) -> list[tuple[str, str]]:
     """Every tenant-scoped (dn, class_name) pair this template owns (its
     VRFs/BDs/ANPs/EPGs) — used to scope an undeploy's delete to just this
@@ -351,6 +487,18 @@ def _template_object_dns(tenant: str, template: dict) -> list[tuple[str, str]]:
         name = graph.get("name") if isinstance(graph, dict) else None
         if name:
             dns.append((f"uni/tn-{tenant}/AbsGraph-{name}", "vnsAbsGraph"))
+    # The relay policies this template's BD labels pulled onto the site came in
+    # with the deploy, so they leave with the undeploy. Deleting the BD alone
+    # would strand them.
+    for bd in template.get("bds", []) or []:
+        if not isinstance(bd, dict):
+            continue
+        for label in bd.get("dhcpLabels", []) or []:
+            if not isinstance(label, dict):
+                continue
+            name = label.get("name") or _basename(label.get("ref"))
+            if name:
+                dns.append((f"uni/tn-{tenant}/relayp-{name}", "dhcpRelayP"))
     return dns
 
 
@@ -548,5 +696,10 @@ def mirror_template_to_sites(
         # Contract/filter/service-graph shadows for this site — see
         # _mirror_contracts (dangling fvRsProv/fvRsCons fix).
         written += _mirror_contracts(store, tenant, template)
+
+        # DHCP relay policies named by this template's BD labels.
+        written += _mirror_dhcp_relay_policies(
+            store, state, schema_detail, tenant, template.get("tenantId", ""), template
+        )
 
     return written
