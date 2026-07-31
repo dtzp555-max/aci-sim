@@ -116,23 +116,42 @@ print(raw.strip()[:300])
 }
 
 REFUSED=0
+FAILED=0
 
 hit() {
   local label="$1" host_port="$2"
   local url="https://${host_port}/_sim/${SIM_ACTION}/${NAME}"
   [ "$FORCE" -eq 1 ] && url="${url}?force=1"
   local body code
-  body=$(curl -sk -o /tmp/.sim-state.$$ -w '%{http_code}' -X POST "$url" 2>/dev/null) || body="000"
+  # mktemp, not /tmp/.sim-state.$$: this runs as root and a predictable
+  # name in a world-writable directory is a symlink-overwrite invitation.
+  local tmpf; tmpf=$(mktemp)
+  body=$(curl -sk -o "$tmpf" -w '%{http_code}' -X POST "$url" 2>/dev/null) || body="000"
   code="$body"
-  body=$(cat /tmp/.sim-state.$$ 2>/dev/null); rm -f /tmp/.sim-state.$$
-  if [ "$code" = "409" ]; then
-    # The guard refused: say so in one line rather than making the operator
-    # read a JSON blob, and remember it so the script exits nonzero.
-    REFUSED=1
-    echo "[$label] REFUSED (409) — $(printf '%s' "$body" | reason)"
-  else
-    echo "[$label] $body"
-  fi
+  body=$(cat "$tmpf" 2>/dev/null); rm -f "$tmpf"
+  case "$code" in
+    409)
+      # The guard refused. Distinct from other failures because the operator has
+      # a specific next step: re-push, or --force if they mean it.
+      REFUSED=1
+      echo "[$label] REFUSED (409) — $(printf '%s' "$body" | reason)"
+      ;;
+    2??)
+      echo "[$label] $body"
+      ;;
+    000)
+      # curl never got a reply. Say so — an empty body here used to print as a
+      # bare "[$label] " and slip past unnoticed.
+      FAILED=1
+      echo "[$label] UNREACHABLE — no response from ${host_port}" >&2
+      ;;
+    *)
+      # 404 (no such snapshot), 500, anything else. Silently succeeding here is
+      # how a restore of a name that was never saved reports success.
+      FAILED=1
+      echo "[$label] FAILED (${code}) — $(printf '%s' "$body" | reason)" >&2
+      ;;
+  esac
 }
 
 if [ "$USE_SANDBOX" -eq 1 ]; then
@@ -157,4 +176,10 @@ if [ "$REFUSED" -eq 1 ]; then
   echo "[sim-state] one or more planes refused this snapshot." >&2
   echo "[sim-state] re-push instead (that rebuilds against THIS build), or re-run with --force." >&2
   exit 2
+fi
+
+if [ "$FAILED" -eq 1 ]; then
+  echo "[sim-state] one or more planes failed. The fabric is now PARTIALLY" >&2
+  echo "[sim-state] restored at best — check it before relying on it." >&2
+  exit 3
 fi
