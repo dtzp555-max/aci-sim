@@ -8,10 +8,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from aci_sim.control.persist import (
+    compatibility,
     deserialize_store,
     load_json,
     save_json,
     serialize_store,
+    unwrap,
+    wrap,
     state_dir,
 )
 from aci_sim.mit.mo import MO
@@ -112,21 +115,30 @@ def make_admin_router(state) -> APIRouter:
         """
         path = state_dir() / f"{name}.{state.site.id}.apic.json"
         data = serialize_store(state.store)
-        save_json(path, data)
+        save_json(path, wrap(data))
         return {"status": "ok", "file": str(path), "count": len(data)}
 
     @router.post("/load/{name}")
-    async def load(name: str):
-        """Restore this site's MITStore from a prior :func:`save`."""
+    async def load(name: str, force: bool = False):
+        """Restore this site's MITStore from a prior :func:`save`.
+
+        Refuses a snapshot stamped with a different sim version or topology
+        unless ``force=1`` — see ``persist.compatibility``.
+        """
         path = state_dir() / f"{name}.{state.site.id}.apic.json"
         if not path.exists():
             return _apic_error(
                 f"state '{name}' not found for site {state.site.id}",
                 status_code=404,
             )
-        data = load_json(path)
+        data, meta = unwrap(load_json(path))
+        ok, reason = compatibility(meta)
+        if not ok and not force:
+            # A full-MIT restore across sim versions silently reinstates the
+            # older build's baseline, so refuse by default and say why.
+            return _apic_error(reason, status_code=409)
         state.store = deserialize_store(data)
-        return {"status": "ok", "count": len(data)}
+        return {"status": "ok", "count": len(data), "compatibility": reason}
 
     @router.post("/add-leaf")
     async def add_leaf(request: Request):

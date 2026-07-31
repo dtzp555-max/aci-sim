@@ -14,7 +14,16 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 
-from aci_sim.control.persist import apply_ndo, load_json, save_json, serialize_ndo, state_dir
+from aci_sim.control.persist import (
+    apply_ndo,
+    compatibility,
+    load_json,
+    save_json,
+    serialize_ndo,
+    state_dir,
+    unwrap,
+    wrap,
+)
 
 from .deploy_mirror import mirror_template_to_sites
 from .model import NdoState
@@ -905,17 +914,25 @@ def make_ndo_app(state: NdoState, apic_states: dict[str, Any] | None = None) -> 
     async def sim_save(name: str):
         """Persist the NDO state to disk under *name*."""
         path = state_dir() / f"{name}.ndo.json"
-        save_json(path, serialize_ndo(state))
+        save_json(path, wrap(serialize_ndo(state)))
         return {"status": "ok", "file": str(path)}
 
     @app.post("/_sim/load/{name}")
-    async def sim_load(name: str):
-        """Restore the NDO state from a prior :func:`sim_save`."""
+    async def sim_load(name: str, force: bool = False):
+        """Restore the NDO state from a prior :func:`sim_save`.
+
+        Refuses a snapshot stamped with a different sim version or topology
+        unless ``force=1`` — see ``persist.compatibility``.
+        """
         path = state_dir() / f"{name}.ndo.json"
         if not path.exists():
             raise HTTPException(status_code=404, detail=f"state '{name}' not found")
-        apply_ndo(state, load_json(path))
-        return {"status": "ok"}
+        data, meta = unwrap(load_json(path))
+        ok, reason = compatibility(meta)
+        if not ok and not force:
+            raise HTTPException(status_code=409, detail=reason)
+        apply_ndo(state, data)
+        return {"status": "ok", "compatibility": reason}
 
     @app.post("/mso/api/v1/deploy")
     async def deploy(request: Request):

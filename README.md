@@ -1097,7 +1097,7 @@ on a real APIC):
 | `POST /_sim/add-leaf` | Add a `fabricNode` (`{"id": 105}` or auto-numbered). |
 | `POST /_sim/remove-leaf` | Mark a `fabricNode` deleted (`{"id": 105}`). |
 | `POST /_sim/save/{name}` | Persist this plane's store to disk under `{name}` (`SIM_STATE_DIR`). |
-| `POST /_sim/load/{name}` | Restore this plane's store from a prior `save/{name}`. |
+| `POST /_sim/load/{name}` | Restore this plane's store from a prior `save/{name}`. **409** if that snapshot was taken on a different sim version or topology; `?force=1` overrides. |
 
 Typical pattern: `snapshot` a clean state → mutate via writes → assert →
 `restore` (or `reset`) between test cases.
@@ -1114,6 +1114,34 @@ whole-fabric wrapper: it hits every plane's endpoint in one command (both
 APIC sites' stores + the NDO state), so a full fabric state can be
 snapshotted to disk and restored later in one call instead of one curl per
 plane.
+
+**A restore replaces the fabric, it does not merge into it.** `load` writes back
+a full dump of the store, so restoring a snapshot taken on a *different build*
+reinstates that build's boot-time baseline — the nodes, pods and builtin tenants
+its builders produced — and drops whatever the current ones produce. A snapshot
+predating the `common`/`infra` builtin tenants, restored onto a sim that has
+them, silently yields a fabric without them.
+
+So every `save` stamps a `_meta` header onto the file:
+
+```json
+{"envelope": 1, "sim_version": "0.27.0", "topology": "60f8e08dae71",
+ "saved_at": "2026-07-31T10:49:31+00:00"}
+```
+
+`topology` is a short content hash of `topology.yaml`. `load` compares both
+against the running sim and returns **409** on either mismatch, naming which one
+differed. `?force=1` (or `sim-state.sh … --force`) restores anyway.
+
+Snapshots written before stamping existed are bare dumps with no `_meta`. They
+are **also refused** — an unverifiable restore is no safer than a
+known-mismatched one, since the hazard is reinstating an unknown baseline, and
+in practice the unstamped files on disk are the several-releases-old dumps this
+check exists to catch. Re-push rather than force, when re-pushing is an option:
+that rebuilds against the sim you actually have.
+
+`sim-state.sh` surfaces a refusal as a one-line reason and exits `2`, so a
+scripted restore fails loudly instead of appearing to succeed.
 
 **NDO → APIC deploy mirror:** `POST /mso/api/v1/task` (an NDO template
 deploy, the request `cisco.mso.ndo_schema_template_deploy` sends) now

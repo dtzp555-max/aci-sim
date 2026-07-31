@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.27.0] - 2026-07-31
+
+### Added
+
+- **Snapshots now record which sim and which topology produced them, and a
+  restore checks both.** A snapshot is a full MIT dump, so restoring one taken
+  on a different build silently reinstates *that* build's boot-time baseline
+  and drops whatever the current builders produce — a v0.21 save restored onto
+  v0.26 puts back a fabric with no `common`/`infra` tenants and overwrites
+  mirror-corrected attributes. Every save now carries a `_meta` header
+  (`sim_version`, a short `topology` content hash, `saved_at`) and
+  `POST /_sim/load/{name}` returns **409** on a mismatch. `?force=1` still
+  restores.
+
+  Snapshots written before this are bare list/dict documents: they still parse,
+  but are **also refused** by default. Unverifiable is not safe — the ones
+  already on disk are precisely the several-releases-old dumps the check exists
+  to stop.
+
+  `scripts/sim-state.sh` gained `--force`, prints a one-line reason instead of
+  a JSON blob when a plane refuses (parsing both the NDO `detail` and APIC
+  `imdata/error` envelopes), and exits `2` so a scripted restore fails loudly.
+
+### Fixed
+
+- **`sim_version()` reads the source tree before installed metadata.** An
+  editable install freezes its dist metadata at install time, so
+  `importlib.metadata` still reported **0.18.1** against a 0.26.1 `pyproject`.
+  Stamping snapshots from that would have recorded a version this code had not
+  been for months. A wheel install has no `pyproject` and still uses the
+  metadata, which is authoritative there.
+
 ## [0.26.1] - 2026-07-28
 
 ### Fixed
