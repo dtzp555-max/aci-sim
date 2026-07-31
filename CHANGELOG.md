@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.28.0] - 2026-07-31
+
+### Added
+
+- **The deploy mirror now carries the BD's DHCP label and the relay policy it
+  names into the site APICs.** `bind_dhcp_relay_to_bd` writes `dhcpLabels` onto
+  a schema BD and then deploys the template — a deploy the mirror already
+  handled — but the label never reached a site. Measured on a live two-site
+  fabric: NDO held the relay policy, its providers and the BD label; both APICs
+  held **zero** `dhcpLbl`, `dhcpRelayP` and `dhcpRsProv`. The playbook returned
+  rc=0 with nothing on the site to verify against.
+
+  A deployed BD now gets its `dhcpLbl` children, and the `dhcpRelayP` those
+  labels name is materialized with a `dhcpRsProv` per provider. Both provider
+  shapes resolve: an application EPG (`epgName`, the DHCP2 pattern) becomes
+  `uni/tn-T/ap-A/epg-E`, and an L3Out external EPG (`externalEpgName`, DHCP1)
+  becomes `uni/tn-T/out-L/instP-E` — NDO names only the external EPG, so the
+  owning L3Out is resolved from the schema.
+
+  Only the policies a deployed BD label actually references are mirrored, not
+  the whole tenantPolicy template. Nothing deployed that template, so its other
+  policies have no business on a site; what this closes is the dangling
+  reference — a `dhcpLbl` pointing at an absent `dhcpRelayP` — which is the same
+  thing `_mirror_contracts` already exists to prevent for `fvRsProv`/`fvRsCons`.
+  An undeploy removes the policies it pulled in, rather than stranding them.
+
+  A provider whose target cannot be resolved is skipped rather than guessed:
+  the `dhcpRelayP` still appears, without that `dhcpRsProv`.
+
 ## [0.27.0] - 2026-07-31
 
 ### Added

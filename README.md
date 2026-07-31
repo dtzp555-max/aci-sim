@@ -1143,6 +1143,16 @@ that rebuilds against the sim you actually have.
 `sim-state.sh` surfaces a refusal as a one-line reason and exits `2`, so a
 scripted restore fails loudly instead of appearing to succeed.
 
+**DHCP relay in the mirror:** a deployed BD's `dhcpLabels` become `dhcpLbl`
+children on each site's BD, and the `dhcpRelayP` a label names is materialized
+alongside it with one `dhcpRsProv` per provider. Providers resolve to a real
+target dn — an application EPG (`epgName`) to `uni/tn-T/ap-A/epg-E`, an L3Out
+external EPG (`externalEpgName`) to `uni/tn-T/out-L/instP-E`, the owning L3Out
+being looked up in the schema since NDO records only the external EPG's name.
+Only policies a deployed label references are mirrored: nothing deploys the
+tenantPolicy template itself, so this closes the dangling-reference case without
+pretending the rest of that template reached the site.
+
 **NDO → APIC deploy mirror:** `POST /mso/api/v1/task` (an NDO template
 deploy, the request `cisco.mso.ndo_schema_template_deploy` sends) now
 materializes the deployed multi-site template's VRFs/BDs/ANPs/EPGs and
