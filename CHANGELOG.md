@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.28.1] - 2026-08-01
+
+### Fixed
+
+- **`scripts/sim-state.sh` only failed on the guard.** Every other error — a
+  snapshot name that was never saved (404), a 500, a plane that did not answer
+  at all — printed its response body and exited **0**, so a scripted restore of
+  a typo reported success having restored nothing. A curl failure was worse
+  after 0.27.0 than before it: the empty body printed as a bare `[NDO] ` blank
+  line, where the pre-guard version at least said `curl failed`.
+
+  Non-2xx now fails: exit **2** for the version/topology refusal (unchanged, it
+  has its own next step) and exit **3** for anything else, with the reason and a
+  note that the fabric is partially restored at best. `mktemp` replaces the
+  predictable `/tmp/.sim-state.$$`, which this script wrote to as root.
+
+  Found by independent review.
+
 ## [0.28.0] - 2026-07-31
 
 ### Added
