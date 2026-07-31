@@ -36,13 +36,25 @@ cd "$(dirname "$0")/.."
 PY="./.venv/bin/python"
 
 usage() {
-  echo "usage: $0 {save|restore} <name>" >&2
+  echo "usage: $0 {save|restore} <name> [--force]" >&2
+  echo "  --force   restore a snapshot whose sim version / topology does not" >&2
+  echo "            match, or that predates version stamping. A full-MIT" >&2
+  echo "            restore across builds reinstates the OTHER build's" >&2
+  echo "            baseline — only do this knowing that." >&2
   exit 1
 }
 
-[ $# -eq 2 ] || usage
+[ $# -ge 2 ] || usage
 ACTION="$1"
 NAME="$2"
+shift 2
+FORCE=0
+for a in "$@"; do
+  case "$a" in
+    --force) FORCE=1 ;;
+    *) usage ;;
+  esac
+done
 
 case "$ACTION" in
   save)    SIM_ACTION="save" ;;
@@ -80,11 +92,47 @@ if [ -n "$NDO_IP" ] && reachable "$NDO_IP"; then
   USE_SANDBOX=1
 fi
 
+# Pull the human message out of whichever error envelope a plane used:
+#   NDO  -> {"detail": "..."}                      (FastAPI)
+#   APIC -> {"imdata":[{"error":{"attributes":{"text":"..."}}}]}
+# Falls back to the raw body so a shape we didn't anticipate still prints
+# something readable instead of a stray regex capture.
+reason() {
+  "$PY" -c '
+import json, sys
+raw = sys.stdin.read()
+try:
+    d = json.loads(raw)
+except Exception:
+    print(raw.strip()[:300]); raise SystemExit
+if isinstance(d, dict) and "detail" in d:
+    print(str(d["detail"])[:300]); raise SystemExit
+try:
+    print(d["imdata"][0]["error"]["attributes"]["text"][:300]); raise SystemExit
+except Exception:
+    pass
+print(raw.strip()[:300])
+'
+}
+
+REFUSED=0
+
 hit() {
   local label="$1" host_port="$2"
-  local resp
-  resp=$(curl -sk -X POST "https://${host_port}/_sim/${SIM_ACTION}/${NAME}" || echo '{"status":"error","detail":"curl failed"}')
-  echo "[$label] $resp"
+  local url="https://${host_port}/_sim/${SIM_ACTION}/${NAME}"
+  [ "$FORCE" -eq 1 ] && url="${url}?force=1"
+  local body code
+  body=$(curl -sk -o /tmp/.sim-state.$$ -w '%{http_code}' -X POST "$url" 2>/dev/null) || body="000"
+  code="$body"
+  body=$(cat /tmp/.sim-state.$$ 2>/dev/null); rm -f /tmp/.sim-state.$$
+  if [ "$code" = "409" ]; then
+    # The guard refused: say so in one line rather than making the operator
+    # read a JSON blob, and remember it so the script exits nonzero.
+    REFUSED=1
+    echo "[$label] REFUSED (409) — $(printf '%s' "$body" | reason)"
+  else
+    echo "[$label] $body"
+  fi
 }
 
 if [ "$USE_SANDBOX" -eq 1 ]; then
@@ -103,4 +151,10 @@ else
   hit "APIC-LAB1" "127.0.0.1:${APIC_A_PORT}"
   hit "APIC-LAB2" "127.0.0.1:${APIC_B_PORT}"
   hit "NDO" "127.0.0.1:${NDO_PORT}"
+fi
+
+if [ "$REFUSED" -eq 1 ]; then
+  echo "[sim-state] one or more planes refused this snapshot." >&2
+  echo "[sim-state] re-push instead (that rebuilds against THIS build), or re-run with --force." >&2
+  exit 2
 fi
