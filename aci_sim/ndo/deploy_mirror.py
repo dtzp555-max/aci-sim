@@ -129,6 +129,38 @@ def _find_site_epg(site_entry: dict, anp_name: str, epg_name: str) -> dict | Non
     return None
 
 
+def _prune_stale_dhcp_labels(store: MITStore, bd_dn: str, keep: set[str]) -> None:
+    """Drop dhcpLbl children of *bd_dn* that are no longer declared.
+
+    upsert merges, so a label removed in NDO would otherwise stay on the site
+    forever. Scoped to this BD's own children — nothing else is touched.
+    """
+    for child in store.children(bd_dn, {"dhcpLbl"}):
+        if child.attrs.get("name", "") not in keep:
+            store.delete(child.dn)
+
+
+def _prune_orphan_relay_policies(store: MITStore, tenant: str) -> None:
+    """Drop dhcpRelayP that no BD on this site labels any more.
+
+    Keyed on what the SITE still references rather than on what any one template
+    declares: a policy is here because some BD's label pulled it in, so when no
+    label names it, nothing on this site needs it. Deleting by template instead
+    would remove a policy a different deployed template's BD still points at.
+    """
+    prefix = f"uni/tn-{tenant}/"
+    referenced = {
+        lbl.attrs.get("name", "")
+        for lbl in store.by_class("dhcpLbl")
+        if lbl.dn.startswith(prefix)
+    }
+    for relay in store.by_class("dhcpRelayP"):
+        if not relay.dn.startswith(prefix):
+            continue
+        if relay.attrs.get("name", "") not in referenced:
+            store.delete(relay.dn)
+
+
 def _mirror_bd(store: MITStore, tenant: str, bd: dict, site_bd: dict | None) -> None:
     """Upsert fvCtx-referencing fvBD (+ fvRsCtx/fvSubnet children) for one
     template BD, overlaid with the SITE bd's hostBasedRouting."""
@@ -174,18 +206,21 @@ def _mirror_bd(store: MITStore, tenant: str, bd: dict, site_bd: dict | None) -> 
             scope=scope,
             preferred="yes" if subnet.get("primary") else "no",
         ))
+    declared: set[str] = set()
     for label in bd.get("dhcpLabels", []) or []:
         if not isinstance(label, dict):
             continue
         label_name = label.get("name") or _basename(label.get("ref"))
         if not label_name:
             continue
+        declared.add(label_name)
         bd_mo.add_child(MO(
             "dhcpLbl",
             dn=f"{bd_dn}/dhcplbl-{label_name}",
             name=label_name,
             owner="tenant",
         ))
+    _prune_stale_dhcp_labels(store, bd_dn, declared)
 
     # Merge-upsert (NOT delete-then-recreate) on purpose: the BD may carry an
     # externally-POSTed `epClear` attr (the clear_remote_mac stub a playbook
@@ -487,18 +522,10 @@ def _template_object_dns(tenant: str, template: dict) -> list[tuple[str, str]]:
         name = graph.get("name") if isinstance(graph, dict) else None
         if name:
             dns.append((f"uni/tn-{tenant}/AbsGraph-{name}", "vnsAbsGraph"))
-    # The relay policies this template's BD labels pulled onto the site came in
-    # with the deploy, so they leave with the undeploy. Deleting the BD alone
-    # would strand them.
-    for bd in template.get("bds", []) or []:
-        if not isinstance(bd, dict):
-            continue
-        for label in bd.get("dhcpLabels", []) or []:
-            if not isinstance(label, dict):
-                continue
-            name = label.get("name") or _basename(label.get("ref"))
-            if name:
-                dns.append((f"uni/tn-{tenant}/relayp-{name}", "dhcpRelayP"))
+    # Relay policies are NOT listed here. Deleting relayp-<name> because this
+    # template names it would take out a policy another deployed template's BD
+    # still labels. _prune_orphan_relay_policies removes the ones nothing on the
+    # site references any more, which is the same cleanup without the collateral.
     return dns
 
 
@@ -630,6 +657,9 @@ def mirror_template_to_sites(
             for dn, cls in object_dns:
                 store.upsert(MO(cls, dn=dn, status="deleted"))
                 written += 1
+            # The BDs are gone, so their labels went with them; anything those
+            # labels were holding on the site is now unreferenced.
+            _prune_orphan_relay_policies(store, tenant)
         return written
 
     for site_entry in site_entries:
@@ -701,5 +731,6 @@ def mirror_template_to_sites(
         written += _mirror_dhcp_relay_policies(
             store, state, schema_detail, tenant, template.get("tenantId", ""), template
         )
+        _prune_orphan_relay_policies(store, tenant)
 
     return written

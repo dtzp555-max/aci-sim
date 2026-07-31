@@ -14,6 +14,7 @@ import pytest
 
 from aci_sim.control.persist import (
     compatibility,
+    _read_version,
     sim_version,
     topology_fingerprint,
     unwrap,
@@ -122,4 +123,7 @@ def test_version_comes_from_the_source_tree_not_stale_metadata():
             declared = s.split("=", 1)[1].strip().strip("\"'")
             break
     assert declared, "pyproject has no version"
-    assert sim_version() == declared
+    # _read_version(), not sim_version(): the latter is pinned at import,
+    # so it would not notice a pyproject edit — which is the point of it.
+    assert _read_version() == declared
+    assert sim_version() == _read_version()

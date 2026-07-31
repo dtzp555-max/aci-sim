@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.29.0] - 2026-08-01
+
+### Fixed
+
+- **`sim_version()` is resolved once, at import.** It re-read `pyproject.toml`
+  on every call, and the sim is normally served straight out of a git working
+  tree — so between a `git pull` and the restart that picks it up, the file said
+  the new version while the process was still the old code. Snapshots saved in
+  that window were stamped with a version they were not, and then restored
+  cleanly after the restart *because the stamp matched*: precisely the
+  cross-build restore the guard exists to refuse, waved through by a stamp that
+  was wrong when it was written. Binding it to process start ties the stamp to
+  the code that produced the data.
+
+- **Unbinding a DHCP label in NDO now reaches the site.** `store.upsert` merges
+  and never drops children the new MO omits — deliberately, so an
+  externally-POSTed `epClear` survives a redeploy — so clearing a BD's
+  `dhcpLabels` and redeploying left the `dhcpLbl` and its `dhcpRelayP` on both
+  APICs forever. Labels a BD no longer declares are dropped, and a relay policy
+  is removed once nothing on that site labels it.
+
+  Keyed on **site state, not on the template**: deleting `relayp-<name>` because
+  one template stopped naming it would take out a policy another deployed
+  template's BD still points at. The undeploy path did exactly that, and is
+  corrected the same way.
+
+### Added
+
+- Endpoint-level tests for the snapshot guard. The 0.27.0 tests covered
+  `wrap`/`unwrap`/`compatibility` as pure functions, so deleting either
+  `if not ok and not force: 409` left the suite green and the guard's observable
+  behaviour rested on a manual check. Both planes are now pinned, including the
+  two different refusal envelopes (`detail` for NDO, `imdata/error` for APIC)
+  that `scripts/sim-state.sh` parses, and that 404 stays 404 rather than
+  becoming 409 — the wrapper exits 3 vs 2 on that distinction.
+
+All three found by independent review.
+
 ## [0.28.1] - 2026-08-01
 
 ### Fixed
