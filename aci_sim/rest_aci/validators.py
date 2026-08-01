@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Callable
+from collections.abc import Callable
 
 #: A validator inspects one (class, prop, value) triple and either returns
 #: None (value is legal) or raises ValueError(reason) (value is illegal).

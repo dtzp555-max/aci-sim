@@ -38,7 +38,7 @@ from pydantic import ValidationError
 from aci_sim.build import orchestrator
 from aci_sim.cli import generate_topology
 from aci_sim.topology.loader import load_topology
-from aci_sim.topology.schema import BD, CswPeer, Fabric, ISN, Topology
+from aci_sim.topology.schema import BD, ISN, CswPeer, Fabric, Topology
 
 REPO_ROOT = Path(__file__).parent.parent
 TOPOLOGY_YAML = REPO_ROOT / "topology.yaml"

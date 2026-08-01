@@ -20,9 +20,9 @@ import ipaddress
 import pytest
 from fastapi.testclient import TestClient
 
-from aci_sim.build.orchestrator import build_site
 from aci_sim.build.fabric import loopback_ip, oob_ip
-from aci_sim.build.l3out import _build_node_profile, _upsert_ebgp_sessions
+from aci_sim.build.l3out import _build_node_profile
+from aci_sim.build.orchestrator import build_site
 from aci_sim.mit.store import MITStore
 from aci_sim.rest_aci.app import ApicSiteState, make_apic_app
 from aci_sim.topology.loader import load_topology
@@ -104,7 +104,7 @@ def test_site_b_addresses_valid_and_unique(store_b):
 
     addrs = [r[1] for r in rows]
     oobs = [r[2] for r in rows]
-    for node_id, addr, oob in rows:
+    for _node_id, addr, oob in rows:
         # Every address must parse as valid IPv4 -- this is the core regression
         # check: pre-fix, node 401 produced "10.1.401.1" / "192.168.1.401",
         # both of which ipaddress.ip_address() rejects (octet > 255).

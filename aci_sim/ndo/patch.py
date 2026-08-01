@@ -189,23 +189,21 @@ def _normalize_object(obj: dict, array_key: str, schema_id: str, template_name: 
     if array_key == "anps":
         anp_name = obj.get("name", anp_name)
         if not obj.get("anpRef"):
-            obj["anpRef"] = "/schemas/{}/templates/{}/anps/{}".format(schema_id, template_name, anp_name)
+            obj["anpRef"] = f"/schemas/{schema_id}/templates/{template_name}/anps/{anp_name}"
         for epg in obj.get("epgs", []):
             if isinstance(epg, dict):
                 _normalize_object(epg, "epgs", schema_id, template_name, anp_name)
     elif array_key == "epgs":
         epg_name = obj.get("name", "")
         if not obj.get("epgRef"):
-            obj["epgRef"] = "/schemas/{}/templates/{}/anps/{}/epgs/{}".format(
-                schema_id, template_name, anp_name, epg_name
-            )
+            obj["epgRef"] = f"/schemas/{schema_id}/templates/{template_name}/anps/{anp_name}/epgs/{epg_name}"
         if not obj.get("uuid"):
-            seed = "epg-uuid-{}-{}-{}-{}".format(schema_id, template_name, anp_name, epg_name)
+            seed = f"epg-uuid-{schema_id}-{template_name}-{anp_name}-{epg_name}"
             obj["uuid"] = hashlib.sha256(seed.encode()).hexdigest()[:32]
     elif array_key == "externalEpgs":
         if not obj.get("uuid"):
             ext_epg_name = obj.get("name", "")
-            seed = "extepg-uuid-{}-{}-{}".format(schema_id, template_name, ext_epg_name)
+            seed = f"extepg-uuid-{schema_id}-{template_name}-{ext_epg_name}"
             obj["uuid"] = hashlib.sha256(seed.encode()).hexdigest()[:32]
 
 
@@ -706,7 +704,7 @@ def _mirror_template_epg_to_sites(
     automatic site-epg creation on template EPG add. See
     `_mirror_template_anp_to_sites` for the full rationale. Idempotent."""
     sid = schema_id or doc.get("id", "")
-    epg_ref = "/schemas/{}/templates/{}/anps/{}/epgs/{}".format(sid, template_name, anp_name, epg_name)
+    epg_ref = f"/schemas/{sid}/templates/{template_name}/anps/{anp_name}/epgs/{epg_name}"
     for site in doc.get("sites", []):
         if not isinstance(site, dict) or site.get("templateName") != template_name:
             continue
@@ -716,7 +714,7 @@ def _mirror_template_epg_to_sites(
             # Template-level ANP add should have mirrored the site-anp
             # already; auto-vivify defensively so EPG add never crashes on
             # an out-of-order/partial patch batch.
-            anp_ref = "/schemas/{}/templates/{}/anps/{}".format(sid, template_name, anp_name)
+            anp_ref = f"/schemas/{sid}/templates/{template_name}/anps/{anp_name}"
             site["anps"].append({"anpRef": anp_ref, "epgs": []})
             anp_idx = len(site["anps"]) - 1
         site_anp = site["anps"][anp_idx]

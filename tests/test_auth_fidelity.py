@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import copy
 
-import pytest
 from fastapi.testclient import TestClient
 
 import aci_sim.rest_aci.auth as auth_module

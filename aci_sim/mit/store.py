@@ -1,10 +1,11 @@
 """MITStore — DN-keyed in-memory object store for ACI MOs."""
 
 from __future__ import annotations
+
 import copy
 
-from aci_sim.mit.mo import MO
 from aci_sim.mit.dn import parent_dn
+from aci_sim.mit.mo import MO
 
 
 class MITStore:

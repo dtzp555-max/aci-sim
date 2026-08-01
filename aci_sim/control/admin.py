@@ -13,9 +13,9 @@ from aci_sim.control.persist import (
     load_json,
     save_json,
     serialize_store,
+    state_dir,
     unwrap,
     wrap,
-    state_dir,
 )
 from aci_sim.mit.mo import MO
 
@@ -79,9 +79,9 @@ def make_admin_router(state) -> APIRouter:
 
     @router.post("/reload")
     async def reload(request: Request):
-        from aci_sim.topology.loader import load_topology
         from aci_sim.build.orchestrator import build_site
         from aci_sim.runtime.config import TOPOLOGY_PATH
+        from aci_sim.topology.loader import load_topology
 
         topo = load_topology(TOPOLOGY_PATH)
         fresh_site = _find_site(topo)

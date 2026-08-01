@@ -14,6 +14,7 @@ exercises /api/topology, ~14 real plugins, and the NDO views. Exit 0 = all pass.
 """
 import json
 import sys
+
 import httpx
 
 BASE = "http://127.0.0.1:8000"
@@ -78,7 +79,7 @@ else:
     links = topo.get("links", [])
     roles = sorted({n.get("role", "?") for n in nodes})
     sites_seen = sorted({n.get("site", n.get("pod", "?")) for n in nodes})
-    isn = topo.get("isn") or topo.get("inter_site") or [l for l in links if str(l.get("type", "")).lower().find("isn") >= 0]
+    isn = topo.get("isn") or topo.get("inter_site") or [link for link in links if "isn" in str(link.get("type", "")).lower()]
     rec("GET /api/topology", len(nodes) > 0, f"top-level keys={list(topo.keys())}")
     rec("  topology nodes", len(nodes) >= 6, f"{len(nodes)} nodes, roles={roles}, sites={sites_seen}")
     rec("  topology links", len(links) > 0, f"{len(links)} links")

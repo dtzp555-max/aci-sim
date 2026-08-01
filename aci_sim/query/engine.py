@@ -10,13 +10,13 @@ full pre-pagination matched count and *imdata* is the current page slice.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+
+from dataclasses import dataclass
 from typing import Any
 
 from aci_sim.mit.mo import MO
 from aci_sim.mit.store import MITStore
 from aci_sim.query.filters import FilterParseError, Predicate, parse_filter
-
 
 # ---------------------------------------------------------------------------
 # QueryParams

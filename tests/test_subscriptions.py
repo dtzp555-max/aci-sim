@@ -21,10 +21,12 @@ missing/never-arriving event fails fast instead of hanging the suite.
 from __future__ import annotations
 
 import copy
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from aci_sim.build.orchestrator import build_site
 from aci_sim.rest_aci import subscriptions as subs
@@ -186,7 +188,9 @@ def test_subscription_refresh_requires_auth(client):
 
 
 def test_websocket_rejects_unknown_token(client):
-    with pytest.raises(Exception):
+    # Not bare Exception: that would also pass if the failure came from this
+    # test's own scaffolding rather than from the server rejecting the token.
+    with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/socket-not-a-real-token") as ws:
             _receive_json_with_timeout(ws, timeout=2)
 
@@ -272,7 +276,7 @@ def test_disconnect_cleans_up_subscriptions(client, token):
     sub_resp = client.get("/api/class/fvTenant.json?subscription=yes")
     assert sub_resp.status_code == 200
 
-    with client.websocket_connect(f"/socket{token}") as ws:
+    with client.websocket_connect(f"/socket{token}"):
         pass  # connect then immediately disconnect (context manager exit)
 
     # After disconnect, a change to fvTenant must not raise/error even though

@@ -31,7 +31,7 @@ jobs:
         run: pytest -q
 
   lint:
-    name: ruff (non-blocking)
+    name: ruff
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,10 +44,8 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      # Non-blocking on purpose: the repo currently carries a pre-existing lint
-      # baseline of ~60 errors (mostly import-order/unused-import findings from
-      # incremental PR-by-PR development). Tighten this to a real gate (drop the
-      # `|| true` and/or add `--exit-non-zero-on-fix`) once that baseline is
-      # cleaned up — tracked as a follow-up, not a blocker for public release.
-      - name: ruff check (informational)
-        run: ruff check . || true
+      # Blocking as of 0.29.1. The ~60-finding baseline this job was written
+      # around is cleared; a `|| true` on a clean tree only guarantees the next
+      # finding goes unnoticed.
+      - name: ruff check
+        run: ruff check .

@@ -10,7 +10,6 @@ The state is a plain dataclass — no FastAPI dependency here.
 from __future__ import annotations
 
 import hashlib
-import uuid
 from dataclasses import dataclass, field
 
 from aci_sim.topology.schema import Topology

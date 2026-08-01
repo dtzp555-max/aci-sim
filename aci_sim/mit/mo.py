@@ -1,6 +1,7 @@
 """MO (Managed Object) — building block of the ACI Managed Information Tree."""
 
 from __future__ import annotations
+
 from typing import Any
 
 

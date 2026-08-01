@@ -42,10 +42,9 @@ is documented to guarantee. See docs/CONTRACT.md §Ansible-compatibility.
 from __future__ import annotations
 
 import asyncio
-import copy
 from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 

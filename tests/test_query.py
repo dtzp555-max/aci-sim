@@ -1,9 +1,9 @@
 """Tests for query/ — filters and engine."""
 
 import pytest
+
 from aci_sim.mit.mo import MO
 from aci_sim.mit.store import MITStore
-from aci_sim.query.filters import FilterParseError, parse_filter
 from aci_sim.query.engine import (
     QueryParams,
     params_from_dict,
@@ -11,7 +11,7 @@ from aci_sim.query.engine import (
     run_mo_query,
     run_node_scoped,
 )
-
+from aci_sim.query.filters import FilterParseError, parse_filter
 
 # ---------------------------------------------------------------------------
 # Shared fixture

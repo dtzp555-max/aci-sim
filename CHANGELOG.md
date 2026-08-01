@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
+## [0.29.1] - 2026-08-01
+
+### Changed
+
+- **The CI lint job is a real gate.** It had been `ruff check . || true` since it
+  was added, written around a documented baseline of ~60 findings. The baseline
+  is cleared and the `|| true` is gone: on a clean tree it only guaranteed the
+  next finding would go unnoticed.
+
+  44 findings were mechanical and ruff fixed them. The rest got a decision each
+  rather than a blanket ignore — `zip(strict=True)` where a row is built to
+  match its header, `pytest.raises(Exception)` narrowed to the exception the
+  client actually raises, unpacked-but-unused names underscored, three dead
+  assignments removed, and a per-file `E402` waiver for the one file whose
+  imports genuinely must follow its `sys.path.insert`.
+
+  No behaviour change; suite unchanged at 1192 passed.
+
 ## [0.29.0] - 2026-08-01
 
 ### Fixed

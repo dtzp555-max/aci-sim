@@ -12,3 +12,11 @@ certs/*.crt
 .DS_Store
 snapshots/
 verify_findings.py
+
+# Local topology artifacts. topology.yaml itself is tracked (the tests read it),
+# but a deployment customises it in place, and `git add -A` has twice swept that
+# customisation into a commit — where it breaks every test that asserts the
+# stock topology has no auth block. The backups and the rendered SVG are pure
+# local output and never belong in a commit.
+topology.yaml.*bak*
+topology.svg

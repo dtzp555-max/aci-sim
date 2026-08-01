@@ -68,3 +68,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# The sim imports in this file sit below its sys.path.insert, and that insert is
+# what makes them resolvable when the file is run standalone. Moving them above
+# it would break the file, so the rule is waived here rather than obeyed.
+"tests/verify_autoaci.py" = ["E402"]
