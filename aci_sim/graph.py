@@ -333,7 +333,10 @@ def _links_table_svg(topo: Topology, x: float, y: float) -> tuple[str, int]:
         parts.append(f'<text x="{cx}" y="{hy}" class="tbl-head">{escape(label)}</text>')
     for i, row in enumerate(rows):
         ry = hy + (i + 1) * row_h
-        for (label, cx), val in zip(cols, row):
+        # strict=True: a row is built to match its header, so a length
+        # mismatch means the table is malformed rather than something to
+        # silently truncate past.
+        for (_label, cx), val in zip(cols, row, strict=True):
             parts.append(f'<text x="{cx}" y="{ry}" class="tbl-cell">{escape(val)}</text>')
     parts.append("</g>")
     height = hy + (len(rows) + 1) * row_h + 10

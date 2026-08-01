@@ -9,6 +9,7 @@ square brackets must never be split on the slash.  Examples:
 """
 
 from __future__ import annotations
+
 import re
 
 

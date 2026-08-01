@@ -1,13 +1,17 @@
 """Tests for mit/ — dn, mo, store."""
 
 import copy
-import pytest
+
 from aci_sim.mit.dn import (
-    dn_split, parent_dn, rn_of, name_from_dn, pod_from_dn, dn_class_hint,
+    dn_class_hint,
+    dn_split,
+    name_from_dn,
+    parent_dn,
+    pod_from_dn,
+    rn_of,
 )
 from aci_sim.mit.mo import MO
 from aci_sim.mit.store import MITStore
-
 
 # ---------------------------------------------------------------------------
 # dn.py

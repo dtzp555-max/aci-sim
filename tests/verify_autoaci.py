@@ -21,11 +21,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import sys
-import traceback
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 # ─── Path setup (needed for standalone / different cwd) ──────────────────────
@@ -33,11 +31,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # ─── Sim imports ─────────────────────────────────────────────────────────────
-from aci_sim.topology.loader import load_topology
-from aci_sim.build.orchestrator import build_all, build_site
+from aci_sim.build.orchestrator import build_all
+from aci_sim.ndo.app import make_ndo_app
 from aci_sim.ndo.model import build_ndo_model
 from aci_sim.rest_aci.app import ApicSiteState, make_apic_app
-from aci_sim.ndo.app import make_ndo_app
+from aci_sim.topology.loader import load_topology
 
 # ─── Module-level setup (runs once per pytest session) ───────────────────────
 TOPO_PATH = PROJECT_ROOT / "topology.yaml"

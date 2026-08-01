@@ -34,7 +34,6 @@ from aci_sim.rest_aci.writes import _CLASS_DEFAULTS
 
 from .model import NdoState
 
-
 #: Leaf object-name keys inside a DICT-form NDO ref, in priority order. An
 #: epgRef carries BOTH anpName and epgName, so epgName is checked first (the
 #: EPG's own name wins); every other ref dict carries only its own *Name key.

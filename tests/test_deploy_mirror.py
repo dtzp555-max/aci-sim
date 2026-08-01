@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import pytest
 from fastapi.testclient import TestClient
 
 from aci_sim.mit.store import MITStore

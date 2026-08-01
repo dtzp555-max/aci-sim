@@ -9,14 +9,13 @@ Usage::
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
 
 import yaml
 
 from .schema import Topology
 
 
-def load_topology(path: Union[str, Path]) -> Topology:
+def load_topology(path: str | Path) -> Topology:
     """Read *path*, parse YAML, validate, and return a :class:`~schema.Topology`.
 
     Raises

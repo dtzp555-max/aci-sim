@@ -75,7 +75,7 @@ class _Connection:
     """One live `/socket<token>` websocket connection for a session token."""
 
     token: str
-    queue: "asyncio.Queue[dict]" = field(default_factory=asyncio.Queue)
+    queue: asyncio.Queue[dict] = field(default_factory=asyncio.Queue)
 
 
 @dataclass
@@ -146,7 +146,7 @@ def refresh(subscription_id: str) -> bool:
     return True
 
 
-def register_connection(token: str) -> "asyncio.Queue[dict]":
+def register_connection(token: str) -> asyncio.Queue[dict]:
     """Associate a websocket connection with *token*; returns its event queue.
 
     Only one live connection per token is tracked (matches real APIC — a

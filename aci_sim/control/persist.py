@@ -25,8 +25,9 @@ import copy
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -145,7 +146,7 @@ def wrap(payload: Any) -> dict[str, Any]:
             "envelope": ENVELOPE_VERSION,
             "sim_version": sim_version(),
             "topology": topology_fingerprint(),
-            "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "saved_at": datetime.now(UTC).isoformat(timespec="seconds"),
         },
         "data": payload,
     }

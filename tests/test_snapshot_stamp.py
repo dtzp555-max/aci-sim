@@ -13,14 +13,13 @@ from pathlib import Path
 import pytest
 
 from aci_sim.control.persist import (
-    compatibility,
     _read_version,
+    compatibility,
     sim_version,
     topology_fingerprint,
     unwrap,
     wrap,
 )
-
 
 # ── envelope round trip ─────────────────────────────────────────────────────
 

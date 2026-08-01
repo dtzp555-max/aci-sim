@@ -16,12 +16,12 @@ from pathlib import Path
 
 import pytest
 
+from aci_sim.build import cabling, fabric, health_faults, interfaces, overlay, underlay
+from aci_sim.build.cabling import cabling_links
+from aci_sim.build.fabric import loopback_ip
+from aci_sim.mit.store import MITStore
 from aci_sim.topology.loader import load_topology
 from aci_sim.topology.schema import Topology
-from aci_sim.mit.store import MITStore
-from aci_sim.build import fabric, cabling, underlay, overlay, interfaces, health_faults
-from aci_sim.build.cabling import cabling_links
-from aci_sim.build.fabric import loopback_ip, oob_ip
 
 TOPO_YAML = Path(__file__).parent.parent / "topology.yaml"
 
@@ -107,7 +107,6 @@ def test_fabric_links_reference_real_nodes(store, site_a):
 
 def test_lldp_cdp_matches_cabling(store, site_a, topo):
     """lldpAdjEp sysName values on each node match what the cabling graph predicts."""
-    pod = site_a.pod
     node_map = {n.id: n for n in site_a.all_nodes()}
 
     # Build expected neighbor pairs from cabling_links
@@ -115,7 +114,7 @@ def test_lldp_cdp_matches_cabling(store, site_a, topo):
     #   node n1 expects neighbor n2.name on port eth{s1}/{p1}
     #   node n2 expects neighbor n1.name on port eth{s2}/{p2}
     expected_lldp: set[tuple[int, str]] = set()  # (node_id, neighbor_name)
-    for n1, s1, p1, n2, s2, p2 in cabling_links(site_a):
+    for n1, _s1, _p1, n2, _s2, _p2 in cabling_links(site_a):
         expected_lldp.add((n1, node_map[n2].name))
         expected_lldp.add((n2, node_map[n1].name))
 
@@ -272,7 +271,6 @@ def test_top_system_loopback(store, site_a):
 
 def test_fabric_link_dn_format(store, site_a):
     """fabricLink DNs must be parseable by topology.py's port-extraction logic."""
-    pod = site_a.pod
     for mo in store.by_class("fabricLink"):
         dn = mo.attrs["dn"]
         source_port = target_port = ""
