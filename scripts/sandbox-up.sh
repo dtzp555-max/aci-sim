@@ -17,8 +17,10 @@ PY="./.venv/bin/python"
 
 OS="$(uname -s)"
 
-# Sandbox IPs come straight from topology.yaml (single source of truth).
-IPS=$(PYTHONPATH="$PWD" "$PY" -c "from aci_sim.topology.loader import load_topology; t=load_topology('topology.yaml'); print(' '.join([t.fabric.ndo_mgmt_ip]+[s.mgmt_ip for s in t.sites if s.mgmt_ip]))")
+# Sandbox IPs come straight from the topology (single source of truth).
+# TOPOLOGY_PATH, same variable the runtime reads — the two must agree, or
+# the sim serves one fabric while these scripts bind another's addresses.
+IPS=$(PYTHONPATH="$PWD" "$PY" -c "import os; from aci_sim.topology.loader import load_topology; t=load_topology(os.environ.get('TOPOLOGY_PATH', 'topology.yaml')); print(' '.join([t.fabric.ndo_mgmt_ip]+[s.mgmt_ip for s in t.sites if s.mgmt_ip]))")
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Needs root (loopback alias + bind :443). Re-run:  sudo bash scripts/sandbox-up.sh" >&2

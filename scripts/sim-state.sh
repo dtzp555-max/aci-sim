@@ -63,9 +63,9 @@ case "$ACTION" in
 esac
 
 # Derive sandbox IPs the exact same way scripts/sandbox-up.sh does (single
-# source of truth: topology.yaml). Prints "<ndo_ip> <site_ip> [<site_ip> ...]"
+# source of truth: TOPOLOGY_PATH, defaulting to topology.yaml). Prints "<ndo_ip> <site_ip> [<site_ip> ...]"
 # or nothing if topology.yaml can't be loaded (e.g. no venv yet).
-IPS=$(PYTHONPATH="$PWD" "$PY" -c "from aci_sim.topology.loader import load_topology; t=load_topology('topology.yaml'); print(' '.join([t.fabric.ndo_mgmt_ip]+[s.mgmt_ip for s in t.sites if s.mgmt_ip]))" 2>/dev/null || true)
+IPS=$(PYTHONPATH="$PWD" "$PY" -c "import os; from aci_sim.topology.loader import load_topology; t=load_topology(os.environ.get('TOPOLOGY_PATH', 'topology.yaml')); print(' '.join([t.fabric.ndo_mgmt_ip]+[s.mgmt_ip for s in t.sites if s.mgmt_ip]))" 2>/dev/null || true)
 
 NDO_IP=""
 SITE_IPS=()

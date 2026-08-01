@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PY="./.venv/bin/python"
 OS="$(uname -s)"
-IPS=$(PYTHONPATH="$PWD" "$PY" -c "from aci_sim.topology.loader import load_topology; t=load_topology('topology.yaml'); print(' '.join([t.fabric.ndo_mgmt_ip]+[s.mgmt_ip for s in t.sites if s.mgmt_ip]))")
+IPS=$(PYTHONPATH="$PWD" "$PY" -c "import os; from aci_sim.topology.loader import load_topology; t=load_topology(os.environ.get('TOPOLOGY_PATH', 'topology.yaml')); print(' '.join([t.fabric.ndo_mgmt_ip]+[s.mgmt_ip for s in t.sites if s.mgmt_ip]))")
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Needs root: sudo bash scripts/sandbox-down.sh" >&2
