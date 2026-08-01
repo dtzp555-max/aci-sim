@@ -20,3 +20,6 @@ verify_findings.py
 # local output and never belong in a commit.
 topology.yaml.*bak*
 topology.svg
+# Local design scratch (F-numbered validation notes). `git add -A` swept three
+# of these into a commit; they are working notes, not repo content.
+_F*.md
