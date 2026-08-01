@@ -6,7 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may include breaking changes to the sim's behavior).
 
-## [0.29.1] - 2026-08-01
+## [0.29.2] - 2026-08-01
+
+> Includes everything listed under 0.29.1 below. That section was written but
+> its `pyproject` bump silently did nothing — the script anchored on the
+> previous version string, which had already moved — and no `v0.29.1` tag was
+> ever cut, so nothing shipped under that number.
+
+### Fixed
+
+- **The sandbox scripts honour `TOPOLOGY_PATH`.** The runtime has read it all
+  along; `sandbox-up.sh`, `sandbox-down.sh` and `sim-state.sh` hardcoded
+  `topology.yaml` while the first called it "the single source of truth". Set
+  the variable and the sim served one topology while the scripts bound another's
+  addresses — so the variable could not actually be used, and a deployment was
+  forced to edit the *tracked* file in place. That is how a demo topology twice
+  reached a commit; the second time CI caught it, with every test asserting the
+  stock topology has no `auth:` block failing across the matrix.
+
+### Removed
+
+- Three F-numbered design drafts (1410 lines, marked "DESIGN ONLY") that
+  `git add -A` swept in. Now ignored, along with the local topology backups and
+  the rendered SVG.
+
+## [0.29.1] — folded into 0.29.2, never tagged
 
 ### Changed
 
